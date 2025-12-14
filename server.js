@@ -1,52 +1,29 @@
 const express = require('express');
-const { createClient } = require('redis');
-const app = express();
+const { connectRedis } = require('./config/redis');
+const sessionRoutes = require('./routes/sessions');
 
-// Konfigürasyon
+const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ID = process.env.HOSTNAME || 'localhost';
-const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379';
 
-// Redis İstemcisi Oluştur
-const client = createClient({
-    url: REDIS_URL
-});
-
-client.on('error', (err) => console.log('Redis Client Error', err));
-
-// Redis'e Bağlan (IIFE - Immediately Invoked Function Expression)
-(async () => {
-    await client.connect();
-    console.log(`[${NODE_ID}] Redis'e başarıyla bağlandı!`);
-})();
-
+// Middleware (JSON verisini okumak için şart)
 app.use(express.json());
 
-// 1. Ziyaretçi Sayacı Endpoint'i
-app.get('/', async (req, res) => {
-    try {
-        // Redis'teki 'visits' anahtarını 1 artır
-        const visits = await client.incr('visits');
+// Veritabanı Bağlantısını Başlat
+connectRedis();
 
-        res.json({
-            message: 'ResilientStream API çalışıyor!',
-            node: NODE_ID,
-            total_visits: visits, // Bu sayı Redis'ten geliyor!
-            status: 'Connected to Redis'
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
+// Rotaları Tanımla
+app.use('/api/sessions', sessionRoutes);
 
-// 2. Simülasyon Endpoint'i
-app.post('/api/sessions/init', (req, res) => {
+// Health Check (Basit Kontrol)
+app.get('/', (req, res) => {
     res.json({
-        sessionId: 'session-' + Math.floor(Math.random() * 10000),
-        hostedBy: NODE_ID
+        message: 'ResilientStream API çalışıyor 🚀',
+        node: NODE_ID,
+        status: 'Healthy'
     });
 });
 
 app.listen(PORT, () => {
-    console.log(`[${NODE_ID}] Sunucu ${PORT} portunda çalışıyor...`);
+    console.log(`[${NODE_ID}] Sunucu ${PORT} portunda hazır.`);
 });
