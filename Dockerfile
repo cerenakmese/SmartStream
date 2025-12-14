@@ -1,5 +1,5 @@
 # Hafif Node.js imajı kullan (Alpine Linux)
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Çalışma klasörünü ayarla
 WORKDIR /app

@@ -9,10 +9,8 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      # Redis servisine 'redis' ismiyle ulaşıyoruz
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      # MongoDB servisine 'mongo' ismiyle ulaşıyoruz
       - MONGO_URI=mongodb://mongo:27017/smartstream
       - JWT_SECRET=d14ae31a3472f106d55af1ec43baf751eefbde2a6370c80113ba0a4b56447ab4f85ee3f2cf169c0cbb9af382d16399304856b3e7deea248e5a35178fffebe8aa
     depends_on:
@@ -24,35 +22,35 @@ services:
     command: npm run dev
     networks:
       - smartstream_net
-    # Swarm için hazırlık (Hafta 4'te işimize yarayacak)
     deploy:
       replicas: 1
       restart_policy:
         condition: on-failure
 
-  # --- Redis Stack (Cache + Search + JSON) ---
+  # --- Redis Stack ---
   redis:
     image: redis/redis-stack:latest
     ports:
-      - "6379:6379"  # Veritabanı portu
-      - "8001:8001"  # RedisInsight UI (Görsel Arayüz)
+      - "6379:6379"
+      - "8001:8001"
     networks:
       - smartstream_net
 
-  # --- MongoDB (Ana Veritabanı) ---
+  # --- MongoDB ---
   mongo:
     image: mongo:7.0
     ports:
       - "27017:27017"
     volumes:
-      - mongo_data:/data/db # Veriler kaybolmasın diye volume kullanıyoruz
+      - mongo_data:/data/db
     networks:
       - smartstream_net
 
 # --- Network ve Volume Tanımları ---
 networks:
   smartstream_net:
-    driver: overlay # Swarm modunda çalışması için overlay seçtik (Localde de çalışır)
-    attachable: true  # <--- BU SATIRI EKLEMEN GEREKİYOR
+    driver: bridge  # ⭐ OVERLAY yerine BRIDGE
+    # Swarm için gerektiğinde tekrar overlay'e çevirirsiniz
+
 volumes:
   mongo_data:

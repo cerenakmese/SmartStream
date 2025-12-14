@@ -1,31 +1,19 @@
-const mongoose = require('mongoose');
+const express = require('express');
+const router = express.Router();
+const sessionStateService = require('../services/sessionState');
 
-const UserSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true
-  },
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    match: [
-      /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
-      'Lütfen geçerli bir email adresi giriniz'
-    ]
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6,
-    select: false // Sorgularda şifre varsayılan olarak gelmesin
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
+// Distributed Lock Test Rotası
+router.post('/create', async (req, res) => {
+  try {
+    const { sessionId, hostId } = req.body;
+    
+    // Servisimizi çağırıyoruz (Burada Redlock devreye girecek)
+    const session = await sessionStateService.createSessionState(sessionId, hostId, process.env.HOSTNAME);
+    
+    res.json({ success: true, session });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
   }
 });
 
-module.exports = mongoose.model('User', UserSchema);
+module.exports = router;
