@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 3000
 
 # Başlatma komutu
-CMD ["npm", "start"]
+CMD ["npm", "run", "dev"]

@@ -1,5 +1,15 @@
 const express = require('express');
+const connectDB = require('./src/config/db');
 const app = express();
+
+connectDB();
+
+app.use(express.json());
+
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'UP', service: 'ResilientStream API' });
+});
+
 
 // Konfigürasyon
 const PORT = process.env.PORT || 3000;
