@@ -1,14 +1,16 @@
 version: "3.8"
 
 services:
-  # --- Backend API ---
-  api:
+  # --- SUNUCU 1 (Ana Sunucu - Port 3000) ---
+  api-1:
     build: .
     image: resilient-stream-api
+    container_name: smartstream-api-1
     ports:
-      - "3000:3000"
+      - "3000:3000"  # Sabit Port: 3000
     environment:
       - PORT=3000
+      - HOSTNAME=node-primary
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - MONGO_URI=mongodb://mongo:27017/smartstream
@@ -16,20 +18,35 @@ services:
     depends_on:
       - redis
       - mongo
-    volumes:
-      - .:/app
-      - /app/node_modules
-    command: npm run dev
     networks:
       - smartstream_net
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
+    restart: on-failure
+
+  # --- SUNUCU 2 (Yedek Sunucu - Port 3001) ---
+  api-2:
+    build: .
+    image: resilient-stream-api
+    container_name: smartstream-api-2
+    ports:
+      - "3001:3000"  # Sabit Port: 3001 (İçeride 3000 çalışır, dışarıya 3001 verir)
+    environment:
+      - PORT=3000
+      - HOSTNAME=node-backup
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MONGO_URI=mongodb://mongo:27017/smartstream
+      - JWT_SECRET=d14ae31a3472f106d55af1ec43baf751eefbde2a6370c80113ba0a4b56447ab4f85ee3f2cf169c0cbb9af382d16399304856b3e7deea248e5a35178fffebe8aa
+    depends_on:
+      - redis
+      - mongo
+    networks:
+      - smartstream_net
+    restart: on-failure
 
   # --- Redis Stack ---
   redis:
     image: redis/redis-stack:latest
+    container_name: smartstream-redis-1
     ports:
       - "6379:6379"
       - "8001:8001"
@@ -39,6 +56,7 @@ services:
   # --- MongoDB ---
   mongo:
     image: mongo:7.0
+    container_name: smartstream-mongo-1
     ports:
       - "27017:27017"
     volumes:
@@ -49,8 +67,7 @@ services:
 # --- Network ve Volume Tanımları ---
 networks:
   smartstream_net:
-    driver: bridge  # ⭐ OVERLAY yerine BRIDGE
-    # Swarm için gerektiğinde tekrar overlay'e çevirirsiniz
+    driver: bridge
 
 volumes:
   mongo_data:
