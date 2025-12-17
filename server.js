@@ -1,7 +1,12 @@
 const express = require('express');
+const http = require('http'); //
 const dotenv = require('dotenv');
-const cors = require('cors'); // CORS ekleyin
+const cors = require('cors'); 
 
+
+
+
+const { initSocket } = require('./src/services/socketService');
 // --- Bağlantı Dosyaları ---
 const connectDB = require('./src/config/db');
 require('./src/config/redis');
@@ -16,10 +21,13 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ID = process.env.HOSTNAME || 'localhost';
+const server = http.createServer(app);
+
 
 // --- Middleware ---
-app.use(cors()); // CORS ekleyin
+app.use(cors()); 
 app.use(express.json());
+
 
 // --- Veritabanı Başlatma ---
 connectDB();
@@ -45,8 +53,11 @@ app.get('/', (req, res) => {
     });
 });
 
-// --- Sunucuyu Başlat ---
-// ⭐ ÖNEMLİ: Docker için '0.0.0.0' kullanın
-app.listen(PORT, '0.0.0.0', () => {
+
+initSocket(server);
+
+//sunucuyu baslat
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`[${NODE_ID}] Sunucu ${PORT} portunda çalışıyor.`);
+    console.log(`[${NODE_ID}] 🔌 Socket.io Ağ Geçidi Hazır!`);
 });
