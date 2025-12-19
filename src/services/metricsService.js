@@ -5,10 +5,10 @@ const { redisClient } = require('../config/redis');
 const clientsMetrics = new Map();
 
 // Redis'e yazarken kullanılacak prefix
-const METRIC_PREFIX = 'metrics:'; 
+const METRIC_PREFIX = 'metrics:';
 
 const metricsService = {
-  
+
   /**
    * Sağlık Puanı Hesapla (0 - 100)
    * Formül: 100 - (Loss * 5) - (Jitter * 0.1)
@@ -17,11 +17,9 @@ const metricsService = {
     let score = 100;
 
     // 1. Packet Loss Cezası (Her %1 kayıp = -5 Puan)
-    // Örn: %5 kayıp -> -25 puan
     score -= (packetLoss * 5);
 
     // 2. Jitter Cezası (Her 1 ms jitter = -0.5 Puan)
-    // Örn: 50ms jitter -> -25 puan
     score -= (jitter * 0.5);
 
     // Sınırları Koru (0 ile 100 arasında kalmalı)
@@ -35,7 +33,7 @@ const metricsService = {
     const serverTimestamp = Date.now();
     let metrics = clientsMetrics.get(socketId);
 
-    // --- BAŞLANGIÇ ---
+    // --- BAŞLANGIÇ (INITIAL STATE) ---
     if (!metrics) {
       metrics = {
         prevServerTime: serverTimestamp,
@@ -44,9 +42,11 @@ const metricsService = {
         lastSeqNum: seqNum,
         totalPackets: 1,
         lostPackets: 0,
-        healthScore: 100 // Başlangıçta mükemmel
+        healthScore: 0 // DÜZELTME: Başlangıçta 0 (Henüz akış oturmadı)
       };
       clientsMetrics.set(socketId, metrics);
+
+      // İlk pakette hesaplama yapma, direkt 0 dön (Cold Start)
       return metrics;
     }
 
@@ -58,36 +58,35 @@ const metricsService = {
     metrics.totalPackets++;
     metrics.lastSeqNum = seqNum;
 
-    // Loss Oranı Hesapla (Son 1000 paket için sıfırlanabilir ama şimdilik genel toplam)
+    // Loss Oranı Hesapla
     const totalSent = metrics.totalPackets + metrics.lostPackets;
     const packetLoss = (metrics.lostPackets / totalSent) * 100;
 
     // --- 2. JITTER ---
     const timeDiff = (serverTimestamp - metrics.prevServerTime) - (clientTimestamp - metrics.prevClientTime);
+    // Exponential Moving Average (EMA) ile yumuşatma
     metrics.jitter = metrics.jitter + (Math.abs(timeDiff) - metrics.jitter) / 16;
-    
+
     metrics.prevServerTime = serverTimestamp;
     metrics.prevClientTime = clientTimestamp;
 
-    // --- 3. HEALTH SCORE (YENİ) ---
+    // --- 3. HEALTH SCORE (Canlı Hesaplama) ---
+    // Artık veri akıyor, 100 üzerinden puan kırarak hesapla
     metrics.healthScore = this.calculateHealthScore(metrics.jitter, packetLoss);
 
     // Güncel veriyi Map'e kaydet
     clientsMetrics.set(socketId, metrics);
 
-    // --- 4. REDIS'E KAYDET (YENİ) ---
-    // Her pakette yazmak yorucu olabilir, ama dashboard için canlı veri şart.
-    // TTL: 60 saniye (Kullanıcı düşerse veri silinsin)
+    // --- 4. REDIS'E KAYDET ---
     const redisData = JSON.stringify({
-        jitter: metrics.jitter.toFixed(2),
-        packetLoss: packetLoss.toFixed(2),
-        score: metrics.healthScore,
-        lastUpdated: Date.now()
+      jitter: metrics.jitter.toFixed(2),
+      packetLoss: packetLoss.toFixed(2),
+      score: metrics.healthScore,
+      lastUpdated: Date.now()
     });
 
-    // Fire and Forget (Await kullanıp sistemi yavaşlatmıyoruz)
     redisClient.set(`${METRIC_PREFIX}${socketId}`, redisData, 'EX', 60).catch(err => {
-        console.error('Redis Metric Write Error:', err);
+      console.error('Redis Metric Write Error:', err);
     });
 
     return {
@@ -99,7 +98,6 @@ const metricsService = {
 
   removeClient(socketId) {
     clientsMetrics.delete(socketId);
-    // Redis'ten de sil
     redisClient.del(`${METRIC_PREFIX}${socketId}`);
   }
 };

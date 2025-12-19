@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResilientStream | Engineering Dashboard</title>
+    <!-- Gerekli Kütüphaneler -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Courier New', monospace;
+        }
+
+        .panel {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .log-window {
+            height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+            background: #000;
+            border: 1px solid #475569;
+            padding: 10px;
+        }
+
+        .status-box {
+            width: 100%;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .active-audio {
+            background-color: #22c55e;
+            color: #000;
+            box-shadow: 0 0 10px #22c55e;
+        }
+
+        .active-video {
+            background-color: #3b82f6;
+            color: #000;
+            box-shadow: 0 0 10px #3b82f6;
+        }
+
+        .dropped {
+            background-color: #ef4444 !important;
+            color: white !important;
+            box-shadow: none !important;
+        }
+
+        .disabled {
+            background-color: #334155;
+            color: #94a3b8;
+        }
+
+        /* Node Durumları */
+        .node-active {
+            color: #22c55e;
+            font-weight: bold;
+        }
+
+        .node-dead {
+            color: #ef4444;
+            font-weight: bold;
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+
+<body class="p-5">
+
+    <!-- HEADER -->
+    <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
+        <div>
+            <h1 class="text-2xl font-bold text-blue-400">ResilientStream <span class="text-gray-500 text-sm">v1.0</span>
+            </h1>
+            <p class="text-xs text-gray-400">Distributed Fault-Tolerance & QoS Monitor</p>
+        </div>
+        <div class="text-right">
+            <div id="connectionStatus" class="text-red-500 font-bold">● DISCONNECTED</div>
+            <div class="text-xs text-gray-400">Connected to: <span id="connectedNodeId">Unknown</span></div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-4">
+
+        <!-- SOL SÜTUN: KONTROLLER (3/12) -->
+        <div class="col-span-3 space-y-4">
+
+            <!-- Failover Kontrolü (CHAOS MONKEY) -->
+            <div class="panel border-red-900 bg-red-900/10">
+                <h3 class="text-red-400 font-bold mb-3 border-b border-red-800 pb-1">💀 CHAOS MONKEY</h3>
+                <p class="text-xs text-gray-400 mb-2">Simulate server crash:</p>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <!-- Port 3000: Node Primary -->
+                    <button onclick="killNode(3000)"
+                        class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 px-2 rounded transition">
+                        KILL NODE 1
+                    </button>
+                    <!-- Port 3001: Node Backup -->
+                    <button onclick="killNode(3001)"
+                        class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 px-2 rounded transition">
+                        KILL NODE 2
+                    </button>
+                </div>
+                <div class="mt-2 text-center">
+                    <button onclick="reviveNodes()"
+                        class="w-full bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1 px-2 rounded transition">
+                        ♻️ HEAL ALL NODES
+                    </button>
+                </div>
+            </div>
+
+            <!-- Simülasyon Ayarları -->
+            <div class="panel">
+                <h3 class="text-yellow-400 font-bold mb-3 border-b border-gray-600 pb-1">⚡ NETWORK SABOTAJ</h3>
+
+                <div class="mb-3">
+                    <label class="block text-xs mb-1">Packet Loss Probability (%)</label>
+                    <input type="range" id="lossSlider" min="0" max="50" value="0" class="w-full accent-red-500"
+                        oninput="updateLossVal(this.value)">
+                    <div class="text-right text-xs text-red-400 font-bold"><span id="lossValue">0</span>%</div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="block text-xs mb-1">Jitter (Yapay Gecikme)</label>
+                    <input type="range" id="jitterSlider" min="0" max="500" value="0" class="w-full accent-yellow-500"
+                        oninput="updateJitterVal(this.value)">
+                    <div class="text-right text-xs text-yellow-400 font-bold"><span id="jitterValue">0</span>ms</div>
+                </div>
+
+                <button id="btnToggleSim" onclick="toggleSimulation()"
+                    class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition">
+                    ▶ BAŞLAT
+                </button>
+            </div>
+
+            <!-- Sunucu Durumu (Canlı Liste) -->
+            <div class="panel">
+                <h3 class="text-blue-400 font-bold mb-3 border-b border-gray-600 pb-1">🖥️ CLUSTER STATUS</h3>
+                <ul id="nodeList" class="text-sm space-y-2">
+                    <li class="text-gray-500 text-xs italic">Veri bekleniyor...</li>
+                </ul>
+                <div class="mt-4 text-xs text-gray-500 italic border-t border-gray-700 pt-2">
+                    * Liste her saniye Redis'ten güncellenir.
+                </div>
+            </div>
+        </div>
+
+        <!-- ORTA SÜTUN: GÖRSELLEŞTİRME (6/12) -->
+        <div class="col-span-6 space-y-4">
+            <div class="panel text-center">
+                <h3 class="text-gray-400 text-xs mb-2">LIVE STREAM PACKETS</h3>
+                <div class="flex gap-4">
+                    <div class="w-1/2">
+                        <div id="boxAudio" class="status-box disabled mb-1">AUDIO STREAM</div>
+                        <div class="text-xs text-green-500">Priority: HIGH</div>
+                    </div>
+                    <div class="w-1/2">
+                        <div id="boxVideo" class="status-box disabled mb-1">VIDEO STREAM</div>
+                        <div class="text-xs text-blue-500">Priority: LOW</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <canvas id="qosChart" height="180"></canvas>
+            </div>
+
+            <div class="panel">
+                <h3 class="text-purple-400 font-bold mb-2 text-xs">🧠 SYSTEM LOGS</h3>
+                <div id="decisionLog" class="log-window font-mono text-green-400">
+                    <div>[SYSTEM] Dashboard initialized.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SAĞ SÜTUN: METRİKLER (3/12) -->
+        <div class="col-span-3 space-y-4">
+            <div class="panel">
+                <h3 class="text-gray-400 text-xs mb-2">HEALTH SCORE</h3>
+                <div class="text-5xl font-bold text-center text-white mb-2" id="scoreDisplay">0</div>
+                <div class="w-full bg-gray-700 rounded-full h-2.5">
+                    <div id="scoreBar" class="bg-green-600 h-2.5 rounded-full" style="width: 100%"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3 class="text-gray-400 text-xs mb-2">REAL-TIME STATS</h3>
+                <div class="grid grid-cols-2 gap-4 text-center">
+                    <div class="bg-slate-800 p-2 rounded">
+                        <div class="text-xs text-gray-500">Jitter</div>
+                        <div class="text-xl font-bold text-yellow-400" id="statJitter">0ms</div>
+                    </div>
+                    <div class="bg-slate-800 p-2 rounded">
+                        <div class="text-xs text-gray-500">Packet Loss</div>
+                        <div class="text-xl font-bold text-red-400" id="statLoss">0%</div>
+                    </div>
+                    <div class="bg-slate-800 p-2 rounded col-span-2">
+                        <div class="text-xs text-gray-500">QoS Action</div>
+                        <div class="text-lg font-bold text-white" id="statAction">IDLE</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Kodlarını Yükle -->
+    <script src="dashboard.js"></script>
+</body>
+
+</html>
