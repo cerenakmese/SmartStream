@@ -1,105 +1,100 @@
+require('dotenv').config(); // 1. Ortam değişkenlerini en başta yükle
+
 const express = require('express');
-const http = require('http'); //
-const dotenv = require('dotenv');
-const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
+const cors = require('cors'); // İstemci engellerini kaldırmak için
 
-
-
-
-const { initSocket } = require('./src/services/socketService');
-// --- Bağlantı Dosyaları ---
+// --- Konfigürasyon ve Veritabanı ---
 const connectDB = require('./src/config/db');
-require('./src/config/redis');
-
-const nodeManager = require('./src/services/nodeManager');
-const failoverService = require('./src/services/failoverService');
-
-// --- Rota Dosyaları ---
-const authRoutes = require('./src/routes/authRoutes');
-const sessionRoutes = require('./src/routes/sessions');
-
 const { redisClient } = require('./src/config/redis');
 
-// Ortam Değişkenlerini Yükle
-dotenv.config();
+// --- Servisler ---
+const socketService = require('./src/services/socketService');
+const discoveryService = require('./src/services/discoveryService');
 
+// --- Rota Dosyaları ---
+const authRoutes = require('./src/routes/authRoutes');      // Auth (Giriş/Kayıt)
+const sessionRoutes = require('./src/routes/sessions'); // Oturum Yönetimi
+
+// --- Uygulama Başlatma ---
 const app = express();
-const PORT = process.env.PORT || 3000;
-const NODE_ID = process.env.HOSTNAME || 'localhost';
-const server = http.createServer(app);
+const httpServer = http.createServer(app);
 
+// Sunucu Kimliği (Loglar için)
+const NODE_ID = process.env.HOSTNAME || `node-${Math.floor(Math.random() * 1000)}`;
 
-// --- Middleware ---
-app.use(cors());
-app.use(express.json());
-app.use(express.static('public'));
-
-
-// --- Veritabanı Başlatma ---
+// 2. Veritabanına Bağlan (Server başlamadan önce)
 connectDB();
 
-nodeManager.startHeartbeat();
-// 2. Bu sunucu diğer ölü sunucuları izlemeye başlasın (Failover Watchdog)
-failoverService.startMonitoring();
+// 3. Middleware (Ara Katmanlar)
+app.use(cors());          // Tüm isteklere izin ver (Geliştirme aşaması için)
+app.use(express.json());  // Gelen JSON verilerini oku (req.body için şart!)
 
-// --- Rotalar (Routes) ---
-app.use('/api/auth', authRoutes);
-app.use('/api/sessions', sessionRoutes);
+// 4. Rotaları Tanımla
+app.use('/api/auth', authRoutes);       // Örn: POST /api/auth/login
+app.use('/api/sessions', sessionRoutes); // Örn: POST /api/sessions/create
 
-app.post('/api/admin/kill', async (req, res) => {
-    await nodeManager.simulateCrash(); // Kalp atışını durdur
-    res.json({
-        message: `🚨 Node (${NODE_ID}) çökmüş taklidi yapıyor!`,
-        status: 'CRASHED',
-        node: NODE_ID
-    });
+// Basit Sağlık Kontrolü (Health Check)
+app.get('/', (req, res) => {
+    res.send(`SmartStream API Çalışıyor! 🚀 Node: ${NODE_ID}`);
 });
 
-// 2. Sunucuyu Dirilt
-app.post('/api/admin/revive', async (req, res) => {
-    await nodeManager.startHeartbeat(); // Kalp atışını yeniden başlat
-    res.json({
-        message: `♻️ Node (${NODE_ID}) tekrar hayata döndü!`,
-        status: 'ACTIVE',
-        node: NODE_ID
-    });
-});
-
-// 3. Aktif Node Listesini Getir (Dashboard için)
-app.get('/api/admin/nodes', async (req, res) => {
-    try {
-        const nodes = await redisClient.smembers('active_nodes');
-        res.json({
-            activeNodes: nodes,
-            currentNode: NODE_ID
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+// 5. Socket.io Kurulumu (Redis Adapter ile)
+const io = new Server(httpServer, {
+    cors: {
+        origin: "*", // Frontend'den gelen her şeye izin ver
+        methods: ["GET", "POST"]
     }
 });
 
-// --- Sağlık Kontrolleri (Health Checks) ---
-app.get('/health', (req, res) => {
-    res.status(200).json({
-        status: 'UP',
-        service: 'ResilientStream API',
-        node: NODE_ID
-    });
+// Redis Adapter: Socket.io'nun çoklu sunucuda konuşabilmesi için
+// Mevcut redisClient'ı kopyalayıp Pub/Sub için kullanıyoruz
+const pubClient = redisClient.duplicate();
+const subClient = redisClient.duplicate();
+
+Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
+    // Adapteri bağla
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log(`✅ [${NODE_ID}] Redis Adapter Bağlandı.`);
+    
+    // Socket Servisini Başlat (Olayları Dinle)
+    socketService(io); 
+}).catch(err => {
+    // ioredis bazen otomatik bağlanır, hata verirse buraya düşer ama çalışmaya devam edebilir
+    console.log(`⚠️ Redis Adapter uyarısı (Önemli olmayabilir): ${err.message}`);
+    // Hata olsa bile socket servisini başlatmayı dene
+    io.adapter(createAdapter(pubClient, subClient));
+    socketService(io);
 });
 
-app.get('/', (req, res) => {
-    res.json({
-        message: 'ResilientStream API çalışıyor 🚀',
-        node: NODE_ID,
-        status: 'Healthy'
-    });
+// 6. Sunucuyu Dinlemeye Başla
+const PORT = process.env.PORT || 3000;
+
+httpServer.listen(PORT, '0.0.0.0', async () => {
+    console.log(`\n🚀 [${NODE_ID}] Sunucu ${PORT} portunda yayında!`);
+    console.log(`🔗 DB Durumu: Bağlanıyor...`);
+
+    // Node Registry: "Ben buradayım" sinyali gönder
+    await discoveryService.registerNode();
 });
 
+// 7. Graceful Shutdown (Güvenli Kapanış)
+// Uygulama kapatılırsa (CTRL+C veya Docker stop), kaydı sil
+process.on('SIGTERM', shutDown);
+process.on('SIGINT', shutDown);
 
-initSocket(server);
-
-//sunucuyu baslat
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[${NODE_ID}] Sunucu ${PORT} portunda çalışıyor.`);
-    console.log(`[${NODE_ID}] 🔌 Socket.io Ağ Geçidi Hazır!`);
-});
+async function shutDown() {
+    console.log(`\n👋 [${NODE_ID}] Kapanıyor...`);
+    
+    // Node Registry'den kaydı sil
+    await discoveryService.unregisterNode();
+    
+    // Bağlantıları kapat
+    await redisClient.quit();
+    await pubClient.quit();
+    await subClient.quit();
+    
+    process.exit(0);
+}

@@ -28,26 +28,33 @@ const metricsService = {
 
   /**
    * Ana Hesaplama Fonksiyonu
+   * DEĞİŞİKLİK: Artık sessionId parametresi de alıyor
    */
-  async calculateMetrics(socketId, clientTimestamp, seqNum) {
+  async calculateMetrics(socketId, clientTimestamp, seqNum, sessionId) {
     const serverTimestamp = Date.now();
     let metrics = clientsMetrics.get(socketId);
 
     // --- BAŞLANGIÇ (INITIAL STATE) ---
     if (!metrics) {
       metrics = {
+        sessionId: sessionId || 'unknown', // 👈 YENİ: Session ID'yi hafızaya alıyoruz
         prevServerTime: serverTimestamp,
         prevClientTime: clientTimestamp,
         jitter: 0,
         lastSeqNum: seqNum,
         totalPackets: 1,
         lostPackets: 0,
-        healthScore: 0 // DÜZELTME: Başlangıçta 0 (Henüz akış oturmadı)
+        healthScore: 0 
       };
       clientsMetrics.set(socketId, metrics);
 
       // İlk pakette hesaplama yapma, direkt 0 dön (Cold Start)
-      return metrics;
+      return { ...metrics, socketId };
+    }
+
+    // Eğer daha önce session ID kaydedilmemişse (veya unknown ise) güncelle
+    if (sessionId && metrics.sessionId === 'unknown') {
+        metrics.sessionId = sessionId;
     }
 
     // --- 1. PACKET LOSS ---
@@ -71,7 +78,6 @@ const metricsService = {
     metrics.prevClientTime = clientTimestamp;
 
     // --- 3. HEALTH SCORE (Canlı Hesaplama) ---
-    // Artık veri akıyor, 100 üzerinden puan kırarak hesapla
     metrics.healthScore = this.calculateHealthScore(metrics.jitter, packetLoss);
 
     // Güncel veriyi Map'e kaydet
@@ -79,6 +85,7 @@ const metricsService = {
 
     // --- 4. REDIS'E KAYDET ---
     const redisData = JSON.stringify({
+      sessionId: metrics.sessionId, // 👈 Redis'e de yazalım, debug için iyi olur
       jitter: metrics.jitter.toFixed(2),
       packetLoss: packetLoss.toFixed(2),
       score: metrics.healthScore,
@@ -89,7 +96,11 @@ const metricsService = {
       console.error('Redis Metric Write Error:', err);
     });
 
+    // --- RETURN ---
+    // Buradan dönen veri qosService'e gidecek
     return {
+      socketId: socketId,          // 👈 YENİ: Socket ID'yi ekledik
+      sessionId: metrics.sessionId, // 👈 YENİ: Session ID'yi ekledik (Analytics için şart)
       jitter: parseFloat(metrics.jitter.toFixed(3)),
       packetLoss: parseFloat(packetLoss.toFixed(2)),
       healthScore: metrics.healthScore
