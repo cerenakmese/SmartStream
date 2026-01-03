@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken'); // 👈 EKLENDİ
+const jwt = require('jsonwebtoken');
 const metricsService = require('./metricsService');
 const qosService = require('./qosService');
 const sessionStateService = require('./sessionState');
@@ -6,15 +6,15 @@ const sessionStateService = require('./sessionState');
 
 module.exports = (io) => {
 
-  // 🛡️ GÜVENLİK DUVARI (MIDDLEWARE)
+  //  GÜVENLİK DUVARI (MIDDLEWARE)
   // Bağlantı kurulmadan ÖNCE burası çalışır
   io.use((socket, next) => {
-    // 1. Token'ı Handshake (Tokalaşma) verisinden al
+    // 1. Token'ı Handshake (Tokalaşma) verisinden alma
     // Postman veya Client, token'ı 'auth' objesi içinde göndermeli
     const token = socket.handshake.auth.token || socket.handshake.query.token;
 
     if (!token) {
-      console.log(`⛔ [Socket] Token Yok! Bağlantı Reddedildi: ${socket.id}`);
+      console.log(`[Socket] Token Yok! Bağlantı Reddedildi: ${socket.id}`);
       return next(new Error('Authentication error: Token gerekli!'));
     }
 
@@ -23,24 +23,25 @@ module.exports = (io) => {
     
     jwt.verify(token, secret, (err, decoded) => {
       if (err) {
-        console.log(`⛔ [Socket] Geçersiz Token! Bağlantı Reddedildi: ${socket.id}`);
+        console.log(`[Socket] Geçersiz Token! Bağlantı Reddedildi: ${socket.id}`);
         return next(new Error('Authentication error: Geçersiz Token!'));
       }
 
       // 3. Başarılıysa kullanıcı bilgisini socket'e yapıştır
       // Artık socket.user.userId diyerek bu kim öğrenebiliriz
       socket.user = decoded;
-      // console.log(`✅ [Socket] Yetkili Giriş: ${decoded.userId}`);
+      socket.user.userId = decoded.id;
+      console.log(` [Socket] Yetkili Giriş: ${socket.user.userId}`);
       next(); // Kapıyı aç
     });
   });
 
   // --- BAĞLANTI KABUL EDİLDİ ---
   io.on('connection', (socket) => {
-    // console.log(`🔌 Yeni Bağlantı (Auth): ${socket.id} - User: ${socket.user.userId}`);
+    // console.log(` Yeni Bağlantı (Auth): ${socket.id} - User: ${socket.user.userId}`);
     socket.on('join-session', async (sessionId) => {
         try {
-            console.log(`📥 [Socket] Katılım İsteği: ${socket.user.userId} -> ${sessionId}`);
+            console.log(` [Socket] Katılım İsteği: ${socket.user.userId} -> ${sessionId}`);
 
             // A) Redis'e Kaydet
             const activeParticipants = await sessionStateService.addParticipant(sessionId, socket.user);
@@ -61,10 +62,10 @@ module.exports = (io) => {
                 username: socket.user.username
             });
 
-            console.log(`✅ [Socket] Kullanıcı Odaya Girdi: ${sessionId}`);
+            console.log(`[Socket] Kullanıcı Odaya Girdi: ${sessionId}`);
 
         } catch (error) {
-            console.error(`❌ [Socket] Join Hatası:`, error.message);
+            console.error(` [Socket] Join Hatası:`, error.message);
             socket.emit('error', { message: error.message });
         }
     });
@@ -95,7 +96,7 @@ module.exports = (io) => {
         });
 
       } catch (error) {
-        console.error(`❌ [Socket] Ping Hatası (${socket.id}):`, error);
+        console.error(`[Socket] Ping Hatası (${socket.id}):`, error);
       }
     });
 

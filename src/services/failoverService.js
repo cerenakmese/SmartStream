@@ -31,7 +31,7 @@ class FailoverService {
                 const exists = await redisClient.exists(`node:${targetNodeId}`);
 
                 if (!exists) {
-                    console.warn(`[Failover] 🚨 ÖLÜ NODE TESPİT EDİLDİ: ${targetNodeId}`);
+                    console.warn(`[Failover]  ÖLÜ NODE TESPİT EDİLDİ: ${targetNodeId}`);
                     
                     // 3. Race Condition Önleme: Aynı anda 5 sunucu birden kurtarmaya çalışmasın
                     // Sadece kilit alabilen "Kahraman" sunucu kurtarma işlemini yapar.
@@ -60,7 +60,7 @@ class FailoverService {
      * Ölen sunucunun oturumlarını (Session) kendine alır
      */
     async migrateSessionsFrom(deadNodeId) {
-        console.log(`[Failover] 📦 ${deadNodeId} üzerindeki oturumlar taşınıyor...`);
+        console.log(`[Failover]  ${deadNodeId} üzerindeki oturumlar taşınıyor...`);
         
         // Redis'teki tüm session anahtarlarını bul (Gerçek projede SCAN kullanılır, şimdilik KEYS)
         const keys = await redisClient.keys('session:*');
@@ -85,7 +85,7 @@ class FailoverService {
         }
         
         if (count > 0) {
-            console.log(`[Failover] ✅ BAŞARILI: ${count} adet oturum ${NODE_ID} üzerine alındı.`);
+            console.log(`[Failover]  BAŞARILI: ${count} adet oturum ${NODE_ID} üzerine alındı.`);
         } else {
             console.log(`[Failover] Taşınacak oturum bulunamadı.`);
         }

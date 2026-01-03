@@ -13,7 +13,7 @@ const discoveryService = {
   async registerNode() {
     try {
       await this.sendHeartbeat();
-      console.log(`✅ [Discovery] Node Kaydedildi: ${NODE_ID}`);
+      console.log(` [Discovery] Node Kaydedildi: ${NODE_ID}`);
 
       // Periyodik Nabız (Heartbeat) Başlat
       heartbeatTimer = setInterval(async () => {
@@ -21,7 +21,7 @@ const discoveryService = {
       }, HEARTBEAT_INTERVAL);
 
     } catch (error) {
-      console.error('❌ [Discovery] Kayıt Hatası:', error);
+      console.error(' [Discovery] Kayıt Hatası:', error);
     }
   },
 
@@ -43,7 +43,7 @@ const discoveryService = {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     const key = `service:node:${NODE_ID}`;
     await redisClient.del(key);
-    console.log(`👋 [Discovery] Node Silindi: ${NODE_ID}`);
+    console.log(` [Discovery] Node Silindi: ${NODE_ID}`);
   }
 };
 

@@ -21,7 +21,7 @@ class NodeManagerService {
         if (this.isActive) return; // Zaten çalışıyorsa tekrar başlatma
 
         this.isActive = true;
-        console.log(`[NodeManager] 🟢 Heartbeat başlatıldı: ${NODE_ID}`);
+        console.log(`[NodeManager] Heartbeat başlatıldı: ${NODE_ID}`);
 
         // İlk kaydı yap
         await this.registerNode();
@@ -69,7 +69,7 @@ class NodeManagerService {
     async simulateCrash() {
         this.isActive = false;
         clearInterval(this.timer);
-        console.log(`[NodeManager] 🔴 SİMÜLASYON: Bu node artık ölü taklidi yapıyor! (${NODE_ID})`);
+        console.log(`[NodeManager]  SİMÜLASYON: Bu node artık ölü taklidi yapıyor! (${NODE_ID})`);
         // Not: Redis'ten bilerek silmiyoruz. Sürenin (TTL) kendiliğinden dolmasını bekliyoruz.
     }
 

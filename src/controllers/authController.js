@@ -33,12 +33,12 @@ exports.register = async (req, res) => {
 
     // 5. Token oluştur
     const secret = process.env.JWT_SECRET || 'gizli_anahtar';
-    const token = jwt.sign({ userId: user.id }, secret, {
+    const token = jwt.sign({ id: user.id }, secret, {
       expiresIn: '1d'
     });
 
     res.status(201).json({
-      message: 'Kullanıcı başarıyla oluşturuldu 🚀',
+      message: 'Kullanıcı başarıyla oluşturuldu',
       token
     });
 
@@ -64,17 +64,17 @@ exports.login = async (req, res) => {
       return res.status(404).json({ message: 'Kullanıcı bulunamadı.' });
     }
 
-    // 👇 DEBUG BAŞLANGIÇ: Veritabanından ne geliyor görelim 👇
-    console.log('--------------------------------');
-    console.log('🔍 [Login Debug] Bulunan Kullanıcı:', user);
-    console.log('🔑 [Login Debug] Hashli Şifre:', user.password);
-    console.log('--------------------------------');
-    // 👆 DEBUG BİTİŞ 👆
 
-    // 🛡️ GÜVENLİK KONTROLÜ: Şifre alanı boş mu?
+    console.log('--------------------------------');
+    console.log(' [Login Debug] Bulunan Kullanıcı:', user);
+    console.log(' [Login Debug] Hashli Şifre:', user.password);
+    console.log('--------------------------------');
+
+
+    //  GÜVENLİK KONTROLÜ: Şifre alanı boş mu?
     // (Eski veya hatalı kayıtları yakalamak için)
     if (!user.password) {
-      console.error('❌ HATA: Bu kullanıcının şifresi veritabanında yok (Dirty Data).');
+      console.error(' HATA: Bu kullanıcının şifresi veritabanında yok (Dirty Data).');
       return res.status(500).json({ 
         message: 'Veritabanı hatası: Kullanıcı kaydı bozuk (şifre eksik).' 
       });
@@ -88,13 +88,13 @@ exports.login = async (req, res) => {
 
     // 4. Token üret
     const secret = process.env.JWT_SECRET || 'gizli_anahtar';
-    const token = jwt.sign({ userId: user.id }, secret, {
+    const token = jwt.sign({ id: user.id }, secret, {
       expiresIn: '1d'
     });
 
     res.json({
       success: true,
-      message: 'Giriş başarılı! 🎉',
+      message: 'Giriş başarılı! ',
       token,
       user: {
         id: user.id,

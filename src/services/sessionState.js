@@ -37,7 +37,7 @@ const sessionStateService = {
         startTime: new Date()
       });
       await newSessionLog.save();
-      console.log(`💾 [MongoDB] Yeni Session Kaydedildi: ${sessionId}`);
+      console.log(`[MongoDB] Yeni Session Kaydedildi: ${sessionId}`);
 
       return { ...sessionData, participants: [], networkMetrics: { jitter: 0, packetLoss: 0, healthScore: 100 } };
 
@@ -93,7 +93,6 @@ const sessionStateService = {
   },
 
   // --- 5. OTURUMU SONLANDIR (TEMİZLİK VE ARŞİVLEME) ---
-  // 👇 EN ÖNEMLİ DEĞİŞİKLİK BURADA
   async deleteSession(sessionId) {
     const key = `${SESSION_PREFIX}${sessionId}`;
     
@@ -135,9 +134,43 @@ const sessionStateService = {
         }
     );
 
-    console.log(`🏁 [Session] Oturum Arşivlendi ve Kapatıldı: ${sessionId}`);
+    console.log(` [Session] Oturum Arşivlendi ve Kapatıldı: ${sessionId}`);
     return true;
+  },
+  
+// ... Mevcut kodlar ...
+
+  // --- 6. KALP ATIŞI (SÜRE UZATMA) ---
+  async updateHeartbeat(sessionId) {
+    const key = `${SESSION_PREFIX}${sessionId}`;
+    const exists = await redisClient.exists(key);
+    if (!exists) throw new Error('Oturum bulunamadı.');
+    
+    // Süreyi tekrar 1 saat yap
+    await redisClient.expire(key, SESSION_TTL);
+    return true;
+  },
+
+  // --- 7. TÜM AKTİF OTURUMLARI LİSTELE ---
+  async getAllActiveSessions() {
+    // Redis'te 'session:*' ile başlayan anahtarları bul
+    const keys = await redisClient.keys(`${SESSION_PREFIX}*`);
+    const sessions = [];
+
+    for (const key of keys) {
+      const data = await redisClient.hgetall(key);
+      if (data) {
+        // ID'yi key'den ayıkla (session:room-123 -> room-123)
+        sessions.push({
+          sessionId: data.id,
+          hostId: data.hostId,
+          participantCount: data.participants ? JSON.parse(data.participants).length : 0,
+          status: data.status
+        });
+      }
+    }
+    return sessions;
   }
-};
+}; // Obje kapanışı
 
 module.exports = sessionStateService;

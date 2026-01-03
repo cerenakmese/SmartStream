@@ -15,8 +15,8 @@ const redisClient = new Redis({
 });
 
 // 2. Event Listener'lar (Loglama için)
-redisClient.on('connect', () => console.log('✅ Redis Bağlantısı Başarılı'));
-redisClient.on('error', (err) => console.error('❌ Redis Hatası:', err));
+redisClient.on('connect', () => console.log('Redis Bağlantısı Başarılı'));
+redisClient.on('error', (err) => console.error('Redis Hatası:', err));
 
 // 3. Distributed Lock (Redlock) Kurulumu
 const redlock = new Redlock(

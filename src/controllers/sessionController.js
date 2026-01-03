@@ -1,72 +1,107 @@
-const { client } = require('../config/redis');
-const NODE_ID = process.env.HOSTNAME || 'localhost';
+const sessionStateService = require('../services/sessionState');
 
-// 1. Yeni Oturum (Oda) Oluştur
+// 1. POST /api/sessions/init
 exports.createSession = async (req, res) => {
-    try {
-        const sessionId = 'room-' + Math.floor(Math.random() * 100000);
-        const { hostName } = req.body; // Gönderen kişinin adı
+  try {
+    const { config } = req.body;
+    // Host ID'yi token'dan alıyoruz (Auth middleware sayesinde)
+    const hostId = req.user.userId || req.user.id;
+    const nodeId = process.env.HOSTNAME || 'node-primary';
 
-        // Redis'e Hash olarak kaydet (Oda bilgileri)
-        // Anahtar: room-12345, Veri: { host: Ali, node: node-1, status: active }
-        await client.hSet(sessionId, {
-            host: hostName || 'Anonymous',
-            node: NODE_ID,
-            createdAt: new Date().toISOString(),
-            status: 'active'
-        });
+    // Rastgele Session ID üret (veya client'tan geleni kullan)
+    const sessionId = req.body.sessionId || `room-${Date.now()}`;
 
-        // Odayı 1 saat sonra otomatik sil (Expire - 3600 saniye)
-        await client.expire(sessionId, 3600);
+    const session = await sessionStateService.createSessionState(
+        sessionId, 
+        hostId, 
+        nodeId
+    );
 
-        res.status(201).json({
-            success: true,
-            message: 'Oturum oluşturuldu',
-            sessionId: sessionId,
-            hostedByNode: NODE_ID
-        });
-
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    res.status(201).json({
+        success: true,
+        message: 'Oturum başarıyla başlatıldı.',
+        sessionId: sessionId,
+        data: session
+    });
+  } catch (error) {
+    console.error('Create Session Error:', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
 };
 
-// 2. Oturuma Katıl
+// 2. POST /api/sessions/:id/join
 exports.joinSession = async (req, res) => {
-    try {
-        const { id } = req.params; // URL'den gelen ID (room-12345)
+  try {
+    const { id } = req.params;
+    // Kullanıcı bilgisini token'dan al
+    const user = {
+        userId: req.user.userId || req.user.id,
+        username: req.user.username || 'Anonymous'
+    };
 
-        // Önce oda var mı diye kontrol et
-        const sessionExists = await client.exists(id);
+    const participants = await sessionStateService.addParticipant(id, user);
 
-        if (!sessionExists) {
-            return res.status(404).json({ error: 'Oturum bulunamadı veya süresi doldu.' });
-        }
-
-        // Odanın bilgilerini çek
-        const sessionData = await client.hGetAll(id);
-
-        res.json({
-            success: true,
-            message: 'Oturuma katıldınız',
-            session: sessionData,
-            connectedVia: NODE_ID
-        });
-
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    res.status(200).json({
+        success: true,
+        message: 'Oturuma katılım başarılı.',
+        sessionId: id,
+        participants
+    });
+  } catch (error) {
+    res.status(404).json({ success: false, error: error.message });
+  }
 };
 
-// 3. Kalp Atışı (Heartbeat) - Oturumu canlı tut
+// 3. POST /api/sessions/:id/heartbeat
 exports.heartbeat = async (req, res) => {
-    try {
-        const { id } = req.params;
-        // Odanın süresini tekrar 1 saate uzat
-        await client.expire(id, 3600);
+  try {
+    const { id } = req.params;
+    await sessionStateService.updateHeartbeat(id);
+    res.status(200).json({ success: true, message: 'Oturum süresi uzatıldı.' });
+  } catch (error) {
+    res.status(404).json({ success: false, error: error.message });
+  }
+};
 
-        res.json({ success: true, status: 'alive' });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+// 4. GET /api/sessions/:id/state
+exports.getSessionState = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const state = await sessionStateService.getSessionState(id);
+
+    if (!state) {
+        return res.status(404).json({ success: false, error: 'Oturum bulunamadı.' });
     }
+    res.status(200).json({ success: true, data: state });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 5. GET /api/sessions/active
+exports.listActiveSessions = async (req, res) => {
+  try {
+    const sessions = await sessionStateService.getAllActiveSessions();
+    res.status(200).json({
+        success: true,
+        count: sessions.length,
+        data: sessions
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 6. POST /api/sessions/:id/leave
+exports.leaveSession = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId || req.user.id;
+
+    await sessionStateService.removeParticipant(id, userId);
+
+    res.status(200).json({ success: true, message: 'Oturumdan ayrıldınız.' });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
 };

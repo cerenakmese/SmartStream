@@ -37,7 +37,7 @@ const metricsService = {
     // --- BAŞLANGIÇ (INITIAL STATE) ---
     if (!metrics) {
       metrics = {
-        sessionId: sessionId || 'unknown', // 👈 YENİ: Session ID'yi hafızaya alıyoruz
+        sessionId: sessionId || 'unknown', 
         prevServerTime: serverTimestamp,
         prevClientTime: clientTimestamp,
         jitter: 0,
@@ -85,7 +85,7 @@ const metricsService = {
 
     // --- 4. REDIS'E KAYDET ---
     const redisData = JSON.stringify({
-      sessionId: metrics.sessionId, // 👈 Redis'e de yazalım, debug için iyi olur
+      sessionId: metrics.sessionId, 
       jitter: metrics.jitter.toFixed(2),
       packetLoss: packetLoss.toFixed(2),
       score: metrics.healthScore,
@@ -99,8 +99,8 @@ const metricsService = {
     // --- RETURN ---
     // Buradan dönen veri qosService'e gidecek
     return {
-      socketId: socketId,          // 👈 YENİ: Socket ID'yi ekledik
-      sessionId: metrics.sessionId, // 👈 YENİ: Session ID'yi ekledik (Analytics için şart)
+      socketId: socketId,        
+      sessionId: metrics.sessionId, 
       jitter: parseFloat(metrics.jitter.toFixed(3)),
       packetLoss: parseFloat(packetLoss.toFixed(2)),
       healthScore: metrics.healthScore

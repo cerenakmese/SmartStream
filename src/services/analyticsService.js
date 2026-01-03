@@ -11,7 +11,7 @@ const analyticsService = {
       // Sadece 'CRITICAL' veya 'WARNING' durumlarını kaydedelim ki veritabanı şişmesin
       if (decision.status === 'STABLE') return;
 
-      console.log(`📝 [Analytics] QoS Olayı Kaydediliyor: ${decision.action}`);
+      console.log(` [Analytics] QoS Olayı Kaydediliyor: ${decision.action}`);
 
       const newLog = new CallLog({
         sessionId: sessionId, // Hangi oda?
@@ -39,7 +39,7 @@ const analyticsService = {
       await newLog.save();
       
     } catch (error) {
-      console.error('❌ [Analytics] Log Yazma Hatası:', error);
+      console.error(' [Analytics] Log Yazma Hatası:', error);
     }
   },
 

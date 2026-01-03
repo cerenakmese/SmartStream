@@ -4,10 +4,10 @@ const socket = io('http://localhost:3000');
 
 let seqNum = 0; // Paket Sayaç
 
-console.log('📡 Sunucuya bağlanılıyor...');
+console.log(' Sunucuya bağlanılıyor...');
 
 socket.on('connect', () => {
-    console.log(`✅ Bağlandı! Test Başlıyor...`);
+    console.log(`Bağlandı! Test Başlıyor...`);
 
     setInterval(() => {
         seqNum++; // Her döngüde numarayı artır (1, 2, 3...)
@@ -16,7 +16,7 @@ socket.on('connect', () => {
         // %20 ihtimalle paketi gönderme (Sanki ağda kaybolmuş gibi)
         // Sunucu 5 beklerken biz göndermeyip bir sonraki turda 6'yı atacağız.
         if (Math.random() < 0.2) {
-            console.log(`❌ [Simülasyon] Paket #${seqNum} düşürüldü (Gönderilmedi)`);
+            console.log(` [Simülasyon] Paket #${seqNum} düşürüldü (Gönderilmedi)`);
             return; // Bu turu pas geç
         }
 
@@ -33,5 +33,5 @@ socket.on('net-pong', (data) => {
    const stats = data.networkStats;
     const qos = data.qosPolicy;
 
-    console.log(`📊 Puan: ${stats.healthScore} | Durum: ${qos.status} -> Emir: ${qos.action} (${qos.reason})`);
+    console.log(`Puan: ${stats.healthScore} | Durum: ${qos.status} -> Emir: ${qos.action} (${qos.reason})`);
 });
