@@ -5,7 +5,7 @@ const SessionSchema = new mongoose.Schema({
   sessionId: {
     type: String,
     required: true,
-    unique: true,
+    unique: false,
     index: true // Hızlı arama için indeks
   },
 

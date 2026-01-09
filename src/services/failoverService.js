@@ -1,53 +1,44 @@
 const { redisClient, redlock } = require('../config/redis');
 const sessionStateService = require('./sessionState');
 
-const NODE_ID = process.env.HOSTNAME || 'localhost';
-const CHECK_INTERVAL = 10000; // 10 saniyede bir ölü kontrolü yap
+let NODE_ID = process.env.HOSTNAME || 'localhost';
+
+
+const CHECK_INTERVAL = 10000;
 
 class FailoverService {
 
     startMonitoring() {
         console.log(`[Failover] İzleme başlatıldı: ${NODE_ID}`);
-        
+
         setInterval(async () => {
             await this.detectAndMigrate();
+            // 👇 YENİ: Kendi kendine iyileştirme (Yetim oturumları topla)
+            await this.reclaimOrphanedSessions();
         }, CHECK_INTERVAL);
     }
 
-    /**
-     * Ölü node'ları bulur ve oturumlarını kurtarır
-     */
     async detectAndMigrate() {
         try {
-            // 1. Tüm kayıtlı node'ları getir
-            const allNodes = await redisClient.smembers('active_nodes');
+            const allKnownNodes = await redisClient.smembers('known_nodes');
+            const activeNodes = await redisClient.smembers('active_nodes');
 
-            for (const targetNodeId of allNodes) {
-                // Kendi kendimizi kontrol etmeyelim
+            for (const targetNodeId of allKnownNodes) {
                 if (targetNodeId === NODE_ID) continue;
 
-                // 2. Node'un Redis'te hala anahtarı var mı?
-                // (NodeManager'da TTL vermiştik, süre bittiyse anahtar silinmiştir)
-                const exists = await redisClient.exists(`node:${targetNodeId}`);
+                const isAlive = activeNodes.includes(targetNodeId);
 
-                if (!exists) {
-                    console.warn(`[Failover]  ÖLÜ NODE TESPİT EDİLDİ: ${targetNodeId}`);
-                    
-                    // 3. Race Condition Önleme: Aynı anda 5 sunucu birden kurtarmaya çalışmasın
-                    // Sadece kilit alabilen "Kahraman" sunucu kurtarma işlemini yapar.
-                    const lockKey = `lock:migration:${targetNodeId}`;
-                    try {
-                        const lock = await redlock.acquire([lockKey], 5000);
-                        
-                        // Kilit aldık, kurtarma operasyonu başlasın!
-                        await this.migrateSessionsFrom(targetNodeId);
-                        
-                        // Ölü node'u listeden temizle
-                        await redisClient.srem('active_nodes', targetNodeId);
-                        
-                        await lock.release();
-                    } catch (e) {
-                        // Kilit alınamadıysa başka bir node zaten kurtarıyordur, sorun yok.
+                if (!isAlive) {
+                    const exists = await redisClient.exists(`node:${targetNodeId}`);
+
+                    if (!exists) {
+                        const lockKey = `lock:migration:${targetNodeId}`;
+                        try {
+                            const lock = await redlock.acquire([lockKey], 5000);
+                            console.warn(`[Failover] 🚨 ÖLÜ NODE TESPİT EDİLDİ: ${targetNodeId}`);
+                            await this.migrateSessionsFrom(targetNodeId);
+                            await lock.release();
+                        } catch (e) { }
                     }
                 }
             }
@@ -56,38 +47,63 @@ class FailoverService {
         }
     }
 
-    /**
-     * Ölen sunucunun oturumlarını (Session) kendine alır
-     */
+    // 👇 YENİ FONKSİYON: Sahipsiz oturumları kurtar
+    async reclaimOrphanedSessions() {
+        try {
+            const keys = await redisClient.keys('session:*');
+            const activeNodes = await redisClient.smembers('active_nodes');
+
+            for (const key of keys) {
+                const sessionData = await redisClient.hgetall(key);
+
+                // Eğer oturumun node'u "aktifler listesinde" yoksa, o oturum yetimdir!
+                if (sessionData && sessionData.nodeId && !activeNodes.includes(sessionData.nodeId)) {
+
+                    // Kilit alıp oturumu üzerimize alalım
+                    const lockKey = `lock:reclaim:${key}`;
+                    try {
+                        const lock = await redlock.acquire([lockKey], 3000);
+
+                        console.log(`[Failover] 🏚️ Yetim oturum bulundu: ${sessionData.sessionId} (Eski Sahip: ${sessionData.nodeId}) -> Bana Geçiyor`);
+
+                        await redisClient.hset(key, {
+                            nodeId: NODE_ID,
+                            lastMigration: Date.now()
+                        });
+                        await redisClient.expire(key, 3600);
+
+                        await lock.release();
+                    } catch (e) {
+                        // Kilit alınamadı, başka biri alıyor olabilir
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[Failover] Reclaim Hatası:', error);
+        }
+    }
+
     async migrateSessionsFrom(deadNodeId) {
-        console.log(`[Failover]  ${deadNodeId} üzerindeki oturumlar taşınıyor...`);
-        
-        // Redis'teki tüm session anahtarlarını bul (Gerçek projede SCAN kullanılır, şimdilik KEYS)
         const keys = await redisClient.keys('session:*');
         let count = 0;
 
         for (const key of keys) {
-            const data = await redisClient.get(key);
-            if (data) {
-                const session = JSON.parse(data);
-                
-                // Eğer bu oturum ölen node'a aitse
-                if (session.nodeId === deadNodeId) {
-                    // Node ID'yi BENİM ID'm ile güncelle
-                    session.nodeId = NODE_ID;
-                    session.lastMigration = Date.now();
-                    
-                    // Güncellenmiş veriyi kaydet
-                    await redisClient.set(key, JSON.stringify(session), 'EX', 86400);
-                    count++;
-                }
+            const sessionData = await redisClient.hgetall(key);
+
+            if (sessionData && sessionData.nodeId === deadNodeId) {
+                await redisClient.hset(key, {
+                    nodeId: NODE_ID,
+                    lastMigration: Date.now()
+                });
+                await redisClient.expire(key, 3600);
+
+                count++;
+                console.log(`[Failover] ♻️ Oturum kurtarıldı: ${sessionData.id || key} -> ${NODE_ID}`);
             }
         }
-        
+
         if (count > 0) {
-            console.log(`[Failover]  BAŞARILI: ${count} adet oturum ${NODE_ID} üzerine alındı.`);
-        } else {
-            console.log(`[Failover] Taşınacak oturum bulunamadı.`);
+            console.log(`[Failover] ✅ TOPLAM: ${count} oturum başarıyla ${NODE_ID} üzerine alındı.`);
         }
     }
 }
