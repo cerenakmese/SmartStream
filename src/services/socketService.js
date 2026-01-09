@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const metricsService = require('./metricsService');
 const qosService = require('./qosService');
 const sessionStateService = require('./sessionState');
+const nodeManager = require('./nodeManager');
 
 module.exports = (io) => {
 
@@ -37,6 +38,12 @@ module.exports = (io) => {
 
   // --- 2. BAĞLANTI KABUL EDİLDİ ---
   io.on('connection', (socket) => {
+
+    if (nodeManager && !nodeManager.isActive) {
+      console.log(`💀 [Socket] Node ölü, bağlantı reddediliyor: ${socket.id}`);
+      socket.disconnect(true);
+      return; // Alt satırlara (recover-session vb.) inmesin
+    }
     console.log(`🔌 [Socket] Bağlandı: ${socket.id}`);
 
     // --- SESSION RECOVERY ---
@@ -92,17 +99,26 @@ module.exports = (io) => {
 
     // --- NETWORK HEALTH MONITOR (Güncellenmiş Hali) ---
     socket.on('net-ping', async (data) => {
+
+      if (!nodeManager.isActive) {
+        console.log(`💀 [Socket] Node ölü olduğu için bağlantı reddediliyor: ${socket.id}`);
+        socket.disconnect(true); // İstemciyi zorla at
+        return; // İşlemi durdur
+      }
+
       try {
         const seqNum = data.seqNum || 0;
         // Frontend'den gelen sessionId'yi al, yoksa null
         const currentSessionId = data.sessionId || null;
+        const simulatedMetrics = data.simulated || { packetLoss: 0, jitter: 0 };
 
         // Metrikleri Hesapla
         const metrics = await metricsService.calculateMetrics(
           socket.id,
           data.timestamp || Date.now(), // clientTimestamp
           seqNum,
-          currentSessionId
+          currentSessionId,
+          simulatedMetrics
         );
 
         // QoS Kararını Al
@@ -119,15 +135,27 @@ module.exports = (io) => {
           networkStats: {
             jitter: metrics.jitter || 0,
             packetLoss: metrics.packetLoss || 0,
-            healthScore: metrics.healthScore || 100
+            healthScore: metrics.healthScore ?? 100
           },
           qosPolicy: qosDecision
         });
 
       } catch (error) {
         console.error(`[Socket] Ping Hatası (${socket.id}):`, error.message);
+        socket.emit('net-pong', {
+          clientTime: data.timestamp,
+          serverTime: Date.now(),
+          networkStats: {
+            jitter: 0,
+            packetLoss: 0,
+            healthScore: 0 // Hata olduğunu belli etmek için 0 veya düşük skor
+          },
+          qosPolicy: { status: 'ERROR', action: 'MAINTAIN', reason: 'Internal Server Error' }
+        });
       }
     });
+
+
 
     socket.on('disconnect', () => {
       if (metricsService && typeof metricsService.removeClient === 'function') {

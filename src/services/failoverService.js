@@ -64,7 +64,7 @@ class FailoverService {
                     try {
                         const lock = await redlock.acquire([lockKey], 3000);
 
-                        console.log(`[Failover] 🏚️ Yetim oturum bulundu: ${sessionData.sessionId} (Eski Sahip: ${sessionData.nodeId}) -> Bana Geçiyor`);
+                        console.log(`[Failover] 🏚️ Yetim oturum bulundu: ${sessionData.Id} (Eski Sahip: ${sessionData.nodeId}) -> Bana Geçiyor`);
 
                         await redisClient.hset(key, {
                             nodeId: NODE_ID,

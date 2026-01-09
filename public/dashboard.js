@@ -15,6 +15,7 @@ let currentSessionId = null; // Kullanıcının aktif olduğu oturum
 let simParams = { lossProb: 0, jitter: 0 };
 let activeNodeList = [];
 let lastPongTime = Date.now(); // Son gelen verinin zamanı
+let wasStreamingBeforeDisconnect = false;
 const TIMEOUT_MS = 4000;
 
 const KNOWN_NODES = ['node-primary', 'node-backup'];
@@ -284,8 +285,13 @@ function renderSessions(sessions) {
 
     sessions.forEach(sess => {
         const isJoined = currentSessionId === sess.sessionId;
-        // Sahipsiz oturum kontrolü
-        const isOrphaned = sess.nodeId === 'none' || sess.nodeId === 'unknown';
+
+        // 👇 YENİ KONTROL: Session'daki node, şu an aktif node listesinde var mı?
+        // activeNodeList, fetchNodes() fonksiyonundan gelen global bir değişkendir.
+        const isActiveNode = activeNodeList.includes(sess.nodeId);
+
+        // Eğer node listede yoksa veya 'none' ise sahipsizdir/ölüdür.
+        const isOrphaned = !isActiveNode || sess.nodeId === 'none' || sess.nodeId === 'unknown';
 
         const tr = document.createElement('tr');
         tr.className = isJoined ? 'bg-blue-900/30' : 'hover:bg-gray-700 transition';
@@ -293,7 +299,7 @@ function renderSessions(sessions) {
         tr.innerHTML = `
             <td class="px-4 py-2 font-mono text-white">${sess.sessionId}</td>
             <td class="px-4 py-2 font-bold ${isOrphaned ? 'text-red-500 animate-pulse' : 'text-yellow-400'}">
-                ${isOrphaned ? '⚠️ SUNUCU YOK' : sess.nodeId}
+                ${isOrphaned ? `⚠️ KOPUK (${sess.nodeId})` : sess.nodeId}
             </td>
             <td class="px-4 py-2">
                 ${isJoined
@@ -384,7 +390,10 @@ function connectSocket() {
 
     socket = io({
         auth: { token: authToken },
-        reconnection: true
+        reconnection: true,
+        reconnectionAttempts: 10,       // 10 kere dene
+        reconnectionDelay: 1000,
+
     });
 
     socket.on('connect', () => {
@@ -392,6 +401,19 @@ function connectSocket() {
         statusEl.innerText = '● CONNECTED';
         statusEl.className = 'text-green-500 font-bold';
         log('Sunucuya bağlanıldı.');
+
+        if (wasStreamingBeforeDisconnect) {
+            console.log("♻️ Bağlantı geri geldi! Yayın sürdürülüyor...");
+
+            // Backend'e "Ben geri geldim, beni eski odama koy" de
+            socket.emit('recover-session');
+
+            // Veri akışını tekrar başlat
+            startSimulation();
+
+            // Hafızayı sıfırla
+            wasStreamingBeforeDisconnect = false;
+        }
     });
 
     socket.on('disconnect', () => {
@@ -399,7 +421,20 @@ function connectSocket() {
         statusEl.innerText = '● DISCONNECTED';
         statusEl.className = 'text-red-500 font-bold';
         log('Bağlantı koptu.');
-        handleSystemCrash();
+        if (isSimulating) {
+            wasStreamingBeforeDisconnect = true; // Hafızaya al
+            stopSimulation(); // Interval'i temizle (Hata basmasın diye)
+
+            // UI'da kullanıcıya bilgi ver
+            const btn = document.getElementById('btnToggleSim');
+            btn.innerText = '⌛ BAĞLANTI BEKLENİYOR...';
+            btn.className = 'w-full bg-yellow-600 text-white font-bold py-2 px-4 rounded animate-pulse';
+        }
+
+        updateDashboardUI({
+            networkStats: { healthScore: 0 },
+            qosPolicy: { action: 'RECONNECTING...' }
+        });
     });
 
     // Backend'den gelen 'net-pong' verisi (Health Score & QoS)
@@ -409,11 +444,14 @@ function connectSocket() {
     });
 }
 
+
+// public/dashboard.js -> updateDashboardUI fonksiyonu
+
 function updateDashboardUI(data) {
     const stats = data.networkStats || {};
     const qos = data.qosPolicy || {};
 
-    // 1. Skor Yazısı ve Bar
+    // --- 1. SKOR VE BAR GÜNCELLEMELERİ (Aynı kalacak) ---
     const score = stats.healthScore || 0;
     document.getElementById('scoreDisplay').innerText = score;
     const bar = document.getElementById('scoreBar');
@@ -424,10 +462,36 @@ function updateDashboardUI(data) {
     else if (score > 40) bar.className = 'bg-yellow-500 h-2.5 rounded-full transition-all duration-500';
     else bar.className = 'bg-red-500 h-2.5 rounded-full transition-all duration-500';
 
-    // 2. QoS Action Yazısı
+    // QoS Action Yazısı
     document.getElementById('statAction').innerText = qos.action || 'NONE';
 
-    // 3. Grafiği Güncelle
+    // --- 2. KUTU IŞIKLARI (SÜREKLİ YANIP/SÖNME MANTIĞI) ---
+    const boxAudio = document.getElementById('boxAudio');
+    const boxVideo = document.getElementById('boxVideo');
+
+    // Varsayılan Durum: Sönük (Disabled)
+    let audioClass = 'disabled';
+    let videoClass = 'disabled';
+
+    // Eğer sistemde hayat varsa (Skor > 0) mantığı çalıştır
+    if (score > 0) {
+        // SES: Ses her zaman en yüksek önceliklidir ve hep açık kalır (Active)
+        audioClass = 'active-audio';
+
+        // VIDEO: QoS kararına göre video açık mı kapalı mı?
+        // Eğer karar 'DROP_VIDEO' veya 'AUDIO_ONLY' ise videoyu söndür.
+        if (qos.action === 'DROP_VIDEO' || qos.action === 'AUDIO_ONLY') {
+            videoClass = 'disabled'; // Video Kapatıldı (Gri)
+        } else {
+            videoClass = 'active-video'; // Video Açık (Mavi) - (MAINTAIN veya LOWER_QUALITY)
+        }
+    }
+
+    // Sınıfları ata (Yanıp sönme yok, kalıcı değişim)
+    boxAudio.className = `status-box ${audioClass} transition-all duration-300`;
+    boxVideo.className = `status-box ${videoClass} transition-all duration-300`;
+
+    // --- 3. GRAFİK GÜNCELLEME (Aynı kalacak) ---
     if (qosChart) {
         const d = qosChart.data.datasets[0].data;
         d.push(score);
@@ -474,7 +538,12 @@ function startSimulation() {
         // Her saniye PING gönder
         socket.emit('net-ping', {
             sessionId: currentSessionId,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            seqNum: ++seqNum, // Sıra numarasını artırarak gönder
+            simulated: {
+                packetLoss: parseInt(simParams.lossProb) || 0,
+                jitter: parseInt(simParams.jitter) || 0
+            }
         });
 
         // EĞER İLK CEVAP GELDİYSE TIMEOUT KONTROLÜ YAP

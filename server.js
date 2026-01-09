@@ -110,3 +110,4 @@ async function shutDown() {
 
     process.exit(0);
 }
+
