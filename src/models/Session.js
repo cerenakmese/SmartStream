@@ -24,8 +24,8 @@ const SessionSchema = new mongoose.Schema({
   // Oturum Durumu
   status: {
     type: String,
-    enum: ['active', 'ended', 'crashed'],
-    default: 'active'
+    enum: ['active', 'inactive', 'crashed'],
+    default: 'inactive'
   },
 
   // Zaman Bilgileri

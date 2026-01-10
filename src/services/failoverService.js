@@ -36,7 +36,7 @@ class FailoverService {
 
                 // SENARYO 1: Node ÖLMÜŞ ama veritabanında hala 'Active' -> BOZ
                 if (!isNodeAlive && sessionData.status === 'active') {
-                    console.log(`[HealthCheck] 💀 Node (${sessionData.nodeId}) ölü! Session (${sessionData.id}) CRITICAL işaretleniyor.`);
+                    console.log(`[HealthCheck] Node (${sessionData.nodeId}) ölü! Session (${sessionData.id}) CRITICAL işaretleniyor.`);
 
                     const crashMetrics = JSON.stringify({ healthScore: 0, packetLoss: 100, jitter: 9999, bandwidth: 0 });
 
@@ -48,7 +48,7 @@ class FailoverService {
 
                 // SENARYO 2: Node GERİ GELMİŞ ama veri 'Error' -> DÜZELT
                 else if (isNodeAlive && sessionData.status === 'network_error') {
-                    console.log(`[HealthCheck] 🌤️ Node (${sessionData.nodeId}) geri geldi! Session (${sessionData.id}) iyileştiriliyor.`);
+                    console.log(`[HealthCheck] Node (${sessionData.nodeId}) geri geldi! Session (${sessionData.id}) iyileştiriliyor.`);
 
                     const healthyMetrics = JSON.stringify({ healthScore: 100, packetLoss: 0, jitter: 0, bandwidth: 0 });
 
@@ -69,9 +69,6 @@ class FailoverService {
             const allKnownNodes = await redisClient.smembers('known_nodes');
             const activeNodes = await redisClient.smembers('active_nodes');
 
-            // --- 🛑 YENİ EKLENEN KISIM: KENDİNİ KONTROL ET (Self-Check) ---
-            // Eğer ben (NODE_ID) aktif listesinde yoksam, ben de "Zombi" olmuşumdur.
-            // Bu durumda işlem yapmayı hemen durdur.
             if (!activeNodes.includes(NODE_ID)) {
                 // Log kirliliği olmasın diye buraya console.log koymuyoruz.
                 // Sessizce kenara çekiliyoruz.
@@ -95,7 +92,7 @@ class FailoverService {
                             // Çakışmayı önlemek için Lock al
                             const lock = await redlock.acquire([lockKey], 5000);
 
-                            console.warn(`[Failover] 🚨 ÖLÜ NODE TESPİT EDİLDİ: ${targetNodeId}`);
+                            console.warn(`[Failover]  ÖLÜ NODE TESPİT EDİLDİ: ${targetNodeId}`);
 
                             // Ölen node'un oturumlarını bana taşı
                             await this.migrateSessionsFrom(targetNodeId);
@@ -129,10 +126,8 @@ class FailoverService {
                     try {
                         const lock = await redlock.acquire([lockKey], 3000);
 
-                        // Hatalı Satır: ... Yetim oturum bulundu: ${sessionData.sessionId} ...
-                        // 👇 DOĞRUSU (sessionData.id olmalı):
 
-                        console.log(`[Failover] 🏚️ Yetim oturum bulundu: ${sessionData.id} (Eski Sahip: ${sessionData.nodeId}) -> Bana Geçiyor`);
+                        console.log(`[Failover]  Yetim oturum bulundu: ${sessionData.id} (Eski Sahip: ${sessionData.nodeId}) -> Bana Geçiyor`);
 
                         await redisClient.hset(key, {
                             nodeId: NODE_ID,
@@ -166,12 +161,12 @@ class FailoverService {
                 await redisClient.expire(key, 3600);
 
                 count++;
-                console.log(`[Failover] ♻️ Oturum kurtarıldı: ${sessionData.id || key} -> ${NODE_ID}`);
+                console.log(`[Failover]  Oturum kurtarıldı: ${sessionData.id || key} -> ${NODE_ID}`);
             }
         }
 
         if (count > 0) {
-            console.log(`[Failover] ✅ TOPLAM: ${count} oturum başarıyla ${NODE_ID} üzerine alındı.`);
+            console.log(`[Failover]  TOPLAM: ${count} oturum başarıyla ${NODE_ID} üzerine alındı.`);
         }
     }
 }

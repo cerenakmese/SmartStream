@@ -2,6 +2,8 @@ const sessionStateService = require('../services/sessionState');
 const { redisClient } = require('../config/redis');
 const metricsService = require('../services/metricsService');
 const qosService = require('../services/qosService');
+const qosEngine = require('../services/qosEngine');
+const User = require('../models/User');
 
 // 1. POST /api/sessions/init
 exports.createSession = async (req, res) => {
@@ -109,33 +111,58 @@ exports.heartbeat = async (req, res) => {
 exports.simulateMetrics = async (req, res) => {
   try {
     const { id } = req.params; // Session ID
-    const { jitter, packetLoss } = req.body; // Sadece ham veri gelir
+    const userId = req.user.userId || req.user.id;
+
+    // 👇 ARTIK SADECE METRİKLERİ ALIYORUZ (Preference yok)
+    const { jitter, packetLoss } = req.body;
 
     if (typeof jitter === 'undefined' || typeof packetLoss === 'undefined') {
-      return res.status(400).json({ success: false, message: 'jitter ve packetLoss gereklidir.' });
+      return res.status(400).json({ success: false, message: 'jitter ve packetLoss zorunludur.' });
     }
 
-    // 1. Puanı Hesapla (Mevcut mantığı kullanıyoruz, yeniden yazmıyoruz)
+    // 1. KULLANICININ GERÇEK AYARINI VERİTABANINDAN ÇEK
+    const user = await User.findById(userId);
+    // Eğer ayar yoksa varsayılan 'balanced' olsun
+    const currentPreference = user.settings?.qosPreference || 'balanced';
+
+    // 2. Health Score Hesapla
     const healthScore = metricsService.calculateHealthScore(Number(jitter), Number(packetLoss));
 
-    // 2. Güncellenecek Veriyi Hazırla
-    const simulatedMetrics = {
+    // 3. Metrik Objesini Hazırla
+    // Redis'e kaydederken tercihi de ekliyoruz ki 'state' endpointi hızlıca okuyabilsin
+    const userMetrics = {
       jitter: Number(jitter),
       packetLoss: Number(packetLoss),
       healthScore: healthScore,
-      isSimulated: true // UI'da bunun test verisi olduğunu anlamak için
+      qosPreference: currentPreference, // 👈 DB'den gelen gerçek tercih
+      updatedAt: Date.now(),
+      isSimulated: true
     };
 
-    // 3. Veritabanına Yaz (Controller işi yapmaz, servise yaptırır)
-    await sessionStateService.updateSessionMetrics(id, simulatedMetrics);
+    // 4. Redis'i Güncelle (Kişiye Özel)
+    await sessionStateService.updateUserMetrics(id, userId, userMetrics);
+
+    // 5. Kararı Hesapla (Response için)
+    let decision = null;
+    if (qosEngine) {
+      decision = qosEngine.determineQualityStrategy(
+        { metrics: userMetrics },
+        { qosPreference: currentPreference } // 👈 Karar verirken DB ayarını kullan
+      );
+    }
 
     res.status(200).json({
       success: true,
       message: 'Simülasyon güncellendi.',
-      data: simulatedMetrics
+      usedPreference: currentPreference, // Hangi ayarı kullandığımızı görelim
+      data: {
+        ...userMetrics,
+        qosDecision: decision
+      }
     });
 
   } catch (error) {
+    console.error(error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

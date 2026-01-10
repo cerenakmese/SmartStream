@@ -10,7 +10,7 @@ module.exports = (req, res, next) => {
         // 403: Forbidden (Giremezsin, yetkin yok)
         return res.status(403).json({
             success: false,
-            message: '⛔ Bu işlem için Admin yetkisi gerekiyor!'
+            message: 'Bu işlem için Admin yetkisi gerekiyor!'
         });
     }
 };

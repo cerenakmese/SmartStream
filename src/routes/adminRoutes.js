@@ -1,7 +1,11 @@
 const express = require('express');
 const router = express.Router();
+const metricsService = require('../services/metricsService');
+const mongoose = require('mongoose');
 const { redisClient } = require('../config/redis');
 const auth = require('../middleware/auth');
+const os = require('os');
+const analyticsService = require('../services/analyticsService');
 const admin = require('../middleware/admin');
 
 const NODE_ID = process.env.HOSTNAME || 'localhost';
@@ -67,5 +71,82 @@ router.post('/revive/:nodeId', auth, admin, async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
+
+
+router.get('/system-health', auth, admin, async (req, res) => {
+    try {
+        // 1. Kaynak Tüketimi (OS ve Process)
+        const uptime = process.uptime();
+        const memoryUsage = process.memoryUsage();
+        const loadAverage = os.loadavg(); // Sunucu yükü (1, 5, 15 dk)
+
+        // 2. Bağımlılık Kontrolleri (Gerçek Durum)
+        const isMongoConnected = mongoose.connection.readyState === 1;
+        const isRedisConnected = redisClient.status === 'ready' || redisClient.isOpen;
+
+        // 3. Genel Sağlık Kararı
+        // Eğer veritabanlarından biri bile yoksa sistem "Sağlıksızdır"
+        const isSystemHealthy = isMongoConnected && isRedisConnected;
+
+        // Sağlıklı değilse 503 (Hizmet Veremiyor), sağlıklıysa 200 (Tamam) dön
+        const httpStatus = isSystemHealthy ? 200 : 503;
+        const systemStatus = isSystemHealthy ? 'Operational' : 'Degraded / Unhealthy';
+
+        res.status(httpStatus).json({
+            success: isSystemHealthy,
+            system: 'Smart Stream Relay API',
+            status: systemStatus, // Artık dinamik!
+            timestamp: new Date().toISOString(),
+            checks: {
+                mongodb: {
+                    status: isMongoConnected ? 'UP' : 'DOWN',
+                    host: mongoose.connection.host
+                },
+                redis: {
+                    status: isRedisConnected ? 'UP' : 'DOWN'
+                }
+            },
+            metrics: {
+                uptime: `${Math.floor(uptime)}s`,
+                process_memory: `${Math.floor(memoryUsage.heapUsed / 1024 / 1024)} MB`,
+                system_load: loadAverage, // [1dk, 5dk, 15dk] ortalaması
+                free_system_memory: `${Math.floor(os.freemem() / 1024 / 1024)} MB`
+            }
+        });
+
+    } catch (error) {
+        console.error('Health Check Error:', error);
+        res.status(500).json({
+            success: false,
+            status: 'Critical Failure',
+            error: error.message
+        });
+    }
+});
+
+router.get('/call-logs', auth, admin, async (req, res) => {
+    try {
+        const { sessionId, event, limit } = req.query;
+
+        // Filtre Hazırla
+        const filter = {};
+        if (sessionId) filter.sessionId = sessionId;
+        if (event) filter.event = event;
+
+        // Servisten Çek
+        const logs = await analyticsService.getLogs(filter, parseInt(limit) || 20);
+
+        res.status(200).json({
+            success: true,
+            count: logs.length,
+            data: logs
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
 
 module.exports = router;
