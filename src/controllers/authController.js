@@ -26,14 +26,15 @@ exports.register = async (req, res) => {
     user = new User({
       username,
       email,
-      password: hashedPassword
+      password: hashedPassword,
+      role: 'user'
     });
 
     await user.save();
 
     // 5. Token oluştur
     const secret = process.env.JWT_SECRET || 'gizli_anahtar';
-    const token = jwt.sign({ id: user.id }, secret, {
+    const token = jwt.sign({ id: user.id, role: user.role }, secret, {
       expiresIn: '1d'
     });
 
@@ -75,8 +76,8 @@ exports.login = async (req, res) => {
     // (Eski veya hatalı kayıtları yakalamak için)
     if (!user.password) {
       console.error(' HATA: Bu kullanıcının şifresi veritabanında yok (Dirty Data).');
-      return res.status(500).json({ 
-        message: 'Veritabanı hatası: Kullanıcı kaydı bozuk (şifre eksik).' 
+      return res.status(500).json({
+        message: 'Veritabanı hatası: Kullanıcı kaydı bozuk (şifre eksik).'
       });
     }
 
@@ -88,7 +89,7 @@ exports.login = async (req, res) => {
 
     // 4. Token üret
     const secret = process.env.JWT_SECRET || 'gizli_anahtar';
-    const token = jwt.sign({ id: user.id }, secret, {
+    const token = jwt.sign({ id: user.id, role: user.role }, secret, {
       expiresIn: '1d'
     });
 
@@ -99,7 +100,8 @@ exports.login = async (req, res) => {
       user: {
         id: user.id,
         username: user.username,
-        email: user.email
+        email: user.email,
+        role: user.role
       }
     });
 

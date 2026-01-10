@@ -4,8 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ResilientStream | Engineering Dashboard</title>
-    <!-- Gerekli Kütüphaneler -->
+    <title>ResilientStream | Admin Panel</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -66,153 +65,189 @@
             color: #94a3b8;
         }
 
-        /* Node Durumları */
-        .node-active {
-            color: #22c55e;
-            font-weight: bold;
+        .hidden {
+            display: none !important;
         }
 
-        .node-dead {
-            color: #ef4444;
-            font-weight: bold;
-            text-decoration: line-through;
-            opacity: 0.7;
+        input {
+            background: #0f172a;
+            border: 1px solid #334155;
+            color: white;
+            padding: 8px;
+            width: 100%;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #3b82f6;
         }
     </style>
 </head>
 
 <body class="p-5">
 
-    <!-- HEADER -->
-    <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
-        <div>
-            <h1 class="text-2xl font-bold text-blue-400">ResilientStream <span class="text-gray-500 text-sm">v1.0</span>
-            </h1>
-            <p class="text-xs text-gray-400">Distributed Fault-Tolerance & QoS Monitor</p>
-        </div>
-        <div class="text-right">
-            <div id="connectionStatus" class="text-red-500 font-bold">● DISCONNECTED</div>
-            <div class="text-xs text-gray-400">Connected to: <span id="connectedNodeId">Unknown</span></div>
+    <div id="authSection" class="flex items-center justify-center h-screen">
+        <div class="panel w-96 text-center shadow-lg shadow-blue-900/20">
+            <h1 class="text-2xl font-bold text-blue-400 mb-6">ResilientStream</h1>
+
+            <div id="loginForm">
+                <h3 class="text-gray-400 mb-4">Giriş Yap</h3>
+                <input type="email" id="loginEmail" placeholder="Email (örn: admin@smart.com)">
+                <input type="password" id="loginPass" placeholder="Şifre">
+                <button onclick="handleLogin()"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded mb-4">GİRİŞ</button>
+                <p class="text-xs text-gray-500 cursor-pointer hover:text-white" onclick="toggleAuth('register')">
+                    Hesabın yok mu? Kayıt Ol</p>
+            </div>
+
+            <div id="registerForm" class="hidden">
+                <h3 class="text-gray-400 mb-4">Kayıt Ol</h3>
+                <input type="text" id="regName" placeholder="İsim">
+                <input type="email" id="regEmail" placeholder="Email">
+                <input type="password" id="regPass" placeholder="Şifre">
+                <input type="text" id="regRole" placeholder="Rol (admin/user)" value="admin">
+                <button onclick="handleRegister()"
+                    class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded mb-4">KAYIT
+                    OL</button>
+                <p class="text-xs text-gray-500 cursor-pointer hover:text-white" onclick="toggleAuth('login')">Zaten üye
+                    misin? Giriş Yap</p>
+            </div>
+
+            <p id="authError" class="text-red-500 text-xs mt-2 hidden"></p>
         </div>
     </div>
 
-    <div class="grid grid-cols-12 gap-4">
-
-        <!-- SOL SÜTUN: KONTROLLER (3/12) -->
-        <div class="col-span-3 space-y-4">
-
-            <!-- Failover Kontrolü (CHAOS MONKEY) -->
-            <div class="panel border-red-900 bg-red-900/10">
-                <h3 class="text-red-400 font-bold mb-3 border-b border-red-800 pb-1">💀 CHAOS MONKEY</h3>
-                <p class="text-xs text-gray-400 mb-2">Simulate server crash:</p>
-
-                <div class="grid grid-cols-2 gap-2">
-                    <!-- Port 3000: Node Primary -->
-                    <button onclick="killNode(3000)"
-                        class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 px-2 rounded transition">
-                        KILL NODE 1
-                    </button>
-                    <!-- Port 3001: Node Backup -->
-                    <button onclick="killNode(3001)"
-                        class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 px-2 rounded transition">
-                        KILL NODE 2
-                    </button>
-                </div>
-                <div class="mt-2 text-center">
-                    <button onclick="reviveNodes()"
-                        class="w-full bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1 px-2 rounded transition">
-                        ♻️ HEAL ALL NODES
-                    </button>
-                </div>
+    <div id="dashboardSection" class="hidden">
+        <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-400">ResilientStream <span
+                        class="text-gray-500 text-sm">v2.0</span></h1>
+                <p class="text-xs text-gray-400">Distributed Fault-Tolerance System</p>
             </div>
-
-            <!-- Simülasyon Ayarları -->
-            <div class="panel">
-                <h3 class="text-yellow-400 font-bold mb-3 border-b border-gray-600 pb-1">⚡ NETWORK SABOTAJ</h3>
-
-                <div class="mb-3">
-                    <label class="block text-xs mb-1">Packet Loss Probability (%)</label>
-                    <input type="range" id="lossSlider" min="0" max="50" value="0" class="w-full accent-red-500"
-                        oninput="updateLossVal(this.value)">
-                    <div class="text-right text-xs text-red-400 font-bold"><span id="lossValue">0</span>%</div>
+            <div class="text-right flex gap-4 items-center">
+                <div>
+                    <div id="connectionStatus" class="text-red-500 font-bold">● DISCONNECTED</div>
+                    <div class="text-xs text-gray-400">User: <span id="currentUser" class="text-white">...</span></div>
                 </div>
-
-                <div class="mb-3">
-                    <label class="block text-xs mb-1">Jitter (Yapay Gecikme)</label>
-                    <input type="range" id="jitterSlider" min="0" max="500" value="0" class="w-full accent-yellow-500"
-                        oninput="updateJitterVal(this.value)">
-                    <div class="text-right text-xs text-yellow-400 font-bold"><span id="jitterValue">0</span>ms</div>
-                </div>
-
-                <button id="btnToggleSim" onclick="toggleSimulation()"
-                    class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition">
-                    ▶ BAŞLAT
-                </button>
-            </div>
-
-            <!-- Sunucu Durumu (Canlı Liste) -->
-            <div class="panel">
-                <h3 class="text-blue-400 font-bold mb-3 border-b border-gray-600 pb-1">🖥️ CLUSTER STATUS</h3>
-                <ul id="nodeList" class="text-sm space-y-2">
-                    <li class="text-gray-500 text-xs italic">Veri bekleniyor...</li>
-                </ul>
-                <div class="mt-4 text-xs text-gray-500 italic border-t border-gray-700 pt-2">
-                    * Liste her saniye Redis'ten güncellenir.
-                </div>
+                <button onclick="logout()"
+                    class="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded">Çıkış</button>
             </div>
         </div>
 
-        <!-- ORTA SÜTUN: GÖRSELLEŞTİRME (6/12) -->
-        <div class="col-span-6 space-y-4">
-            <div class="panel text-center">
-                <h3 class="text-gray-400 text-xs mb-2">LIVE STREAM PACKETS</h3>
-                <div class="flex gap-4">
-                    <div class="w-1/2">
-                        <div id="boxAudio" class="status-box disabled mb-1">AUDIO STREAM</div>
-                        <div class="text-xs text-green-500">Priority: HIGH</div>
+        <div class="grid grid-cols-12 gap-4">
+            <div class="col-span-3 space-y-4">
+
+                <div class="panel">
+                    <h3 class="text-blue-400 font-bold mb-3 border-b border-gray-600 pb-1">🖥️ CLUSTER NODES</h3>
+                    <ul id="nodeList" class="text-sm space-y-2">
+                        <li class="text-gray-500 text-xs italic">Veri bekleniyor...</li>
+                    </ul>
+                    <div class="mt-4 text-xs text-gray-500 italic border-t border-gray-700 pt-2">
+                        * Admin yetkisi ile yönetilir.
                     </div>
-                    <div class="w-1/2">
-                        <div id="boxVideo" class="status-box disabled mb-1">VIDEO STREAM</div>
-                        <div class="text-xs text-blue-500">Priority: LOW</div>
+                </div>
+
+                <div class="panel">
+                    <h3 class="text-yellow-400 font-bold mb-3 border-b border-gray-600 pb-1">⚡ CLIENT SİMÜLASYONU</h3>
+                    <div class="mb-3">
+                        <label class="block text-xs mb-1">Packet Loss (%)</label>
+                        <input type="range" id="lossSlider" min="0" max="50" value="0" class="accent-red-500"
+                            oninput="updateLossVal(this.value)">
+                        <div class="text-right text-xs text-red-400 font-bold"><span id="lossValue">0</span>%</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-xs mb-1">Jitter (Gecikme)</label>
+                        <input type="range" id="jitterSlider" min="0" max="500" value="0" class="accent-yellow-500"
+                            oninput="updateJitterVal(this.value)">
+                        <div class="text-right text-xs text-yellow-400 font-bold"><span id="jitterValue">0</span>ms
+                        </div>
+                    </div>
+                    <button id="btnToggleSim" onclick="toggleSimulation()"
+                        class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition">
+                        ▶ YAYINI BAŞLAT
+                    </button>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-blue-400">📡 YAYIN OTURUMLARI</h2>
+                        <span id="currentSessionDisplay"
+                            class="text-xs bg-gray-900 text-gray-400 px-2 py-1 rounded border border-gray-600">
+                            Oturum Yok
+                        </span>
+                    </div>
+
+                    <div class="flex gap-2 mb-4">
+                        <input type="text" id="newSessionName" placeholder="Oturum Adı (Örn: Canli-Yayin-1)"
+                            class="bg-gray-900 text-white px-3 py-2 rounded border border-gray-600 w-full text-sm focus:outline-none focus:border-blue-500">
+                        <button onclick="createSession()"
+                            class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold transition">
+                            OLUŞTUR
+                        </button>
+                    </div>
+
+                    <div class="overflow-hidden rounded border border-gray-700">
+                        <table class="w-full text-left text-sm text-gray-400">
+                            <thead class="bg-gray-900 text-gray-200 uppercase text-xs">
+                                <tr>
+                                    <th class="px-4 py-2">Session ID</th>
+                                    <th class="px-4 py-2">Host Node</th>
+                                    <th class="px-4 py-2">Aksiyon</th>
+                                    <th class="px-4 py-2">Client Sayısı</th>
+
+                                </tr>
+                            </thead>
+                            <tbody id="sessionListBody" class="divide-y divide-gray-700">
+                                <tr>
+                                    <td colspan="3" class="px-4 py-2 text-center">Yükleniyor...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div id="leaveSessionControls" class="hidden mt-4 text-right">
+                        <button onclick="leaveSession()" class="text-xs text-red-400 hover:text-red-200 underline">
+                            Mevcut Oturumdan Ayrıl
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <div class="panel">
-                <canvas id="qosChart" height="180"></canvas>
-            </div>
-
-            <div class="panel">
-                <h3 class="text-purple-400 font-bold mb-2 text-xs">🧠 SYSTEM LOGS</h3>
-                <div id="decisionLog" class="log-window font-mono text-green-400">
-                    <div>[SYSTEM] Dashboard initialized.</div>
+            <div class="col-span-6 space-y-4">
+                <div class="panel text-center">
+                    <h3 class="text-gray-400 text-xs mb-2">LIVE STREAM MONITOR</h3>
+                    <div class="flex gap-4">
+                        <div class="w-1/2">
+                            <div id="boxAudio" class="status-box disabled mb-1">AUDIO</div>
+                            <div class="text-xs text-green-500">High Priority</div>
+                        </div>
+                        <div class="w-1/2">
+                            <div id="boxVideo" class="status-box disabled mb-1">VIDEO</div>
+                            <div class="text-xs text-blue-500">Low Priority</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <canvas id="qosChart" height="180"></canvas>
+                </div>
+                <div class="panel">
+                    <h3 class="text-purple-400 font-bold mb-2 text-xs">🧠 SYSTEM LOGS</h3>
+                    <div id="decisionLog" class="log-window font-mono text-green-400"></div>
                 </div>
             </div>
-        </div>
 
-        <!-- SAĞ SÜTUN: METRİKLER (3/12) -->
-        <div class="col-span-3 space-y-4">
-            <div class="panel">
-                <h3 class="text-gray-400 text-xs mb-2">HEALTH SCORE</h3>
-                <div class="text-5xl font-bold text-center text-white mb-2" id="scoreDisplay">0</div>
-                <div class="w-full bg-gray-700 rounded-full h-2.5">
-                    <div id="scoreBar" class="bg-green-600 h-2.5 rounded-full" style="width: 100%"></div>
+            <div class="col-span-3 space-y-4">
+                <div class="panel">
+                    <h3 class="text-gray-400 text-xs mb-2">HEALTH SCORE</h3>
+                    <div class="text-5xl font-bold text-center text-white mb-2" id="scoreDisplay">0</div>
+                    <div class="w-full bg-gray-700 rounded-full h-2.5">
+                        <div id="scoreBar" class="bg-green-600 h-2.5 rounded-full" style="width: 100%"></div>
+                    </div>
                 </div>
-            </div>
-
-            <div class="panel">
-                <h3 class="text-gray-400 text-xs mb-2">REAL-TIME STATS</h3>
-                <div class="grid grid-cols-2 gap-4 text-center">
-                    <div class="bg-slate-800 p-2 rounded">
-                        <div class="text-xs text-gray-500">Jitter</div>
-                        <div class="text-xl font-bold text-yellow-400" id="statJitter">0ms</div>
-                    </div>
-                    <div class="bg-slate-800 p-2 rounded">
-                        <div class="text-xs text-gray-500">Packet Loss</div>
-                        <div class="text-xl font-bold text-red-400" id="statLoss">0%</div>
-                    </div>
-                    <div class="bg-slate-800 p-2 rounded col-span-2">
-                        <div class="text-xs text-gray-500">QoS Action</div>
+                <div class="panel">
+                    <h3 class="text-gray-400 text-xs mb-2">QoS ACTION</h3>
+                    <div class="bg-slate-800 p-4 rounded text-center">
                         <div class="text-lg font-bold text-white" id="statAction">IDLE</div>
                     </div>
                 </div>
@@ -220,7 +255,6 @@
         </div>
     </div>
 
-    <!-- JavaScript Kodlarını Yükle -->
     <script src="dashboard.js"></script>
 </body>
 

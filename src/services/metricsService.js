@@ -26,25 +26,21 @@ const metricsService = {
     return Math.max(0, Math.min(100, Math.round(score)));
   },
 
-  /**
-   * Ana Hesaplama Fonksiyonu
-   * DEĞİŞİKLİK: Artık sessionId parametresi de alıyor
-   */
-  async calculateMetrics(socketId, clientTimestamp, seqNum, sessionId) {
+  async calculateMetrics(socketId, clientTimestamp, seqNum, sessionId, simulatedMetrics = {}) {
     const serverTimestamp = Date.now();
     let metrics = clientsMetrics.get(socketId);
 
     // --- BAŞLANGIÇ (INITIAL STATE) ---
     if (!metrics) {
       metrics = {
-        sessionId: sessionId || 'unknown', 
+        sessionId: sessionId || 'unknown',
         prevServerTime: serverTimestamp,
         prevClientTime: clientTimestamp,
         jitter: 0,
         lastSeqNum: seqNum,
         totalPackets: 1,
         lostPackets: 0,
-        healthScore: 0 
+        healthScore: 0
       };
       clientsMetrics.set(socketId, metrics);
 
@@ -54,10 +50,10 @@ const metricsService = {
 
     // Eğer daha önce session ID kaydedilmemişse (veya unknown ise) güncelle
     if (sessionId && metrics.sessionId === 'unknown') {
-        metrics.sessionId = sessionId;
+      metrics.sessionId = sessionId;
     }
 
-    // --- 1. PACKET LOSS ---
+    // --- 1. PACKET LOSS HESABI ---
     const expectedSeqNum = metrics.lastSeqNum + 1;
     if (seqNum > expectedSeqNum) {
       metrics.lostPackets += (seqNum - expectedSeqNum);
@@ -65,29 +61,43 @@ const metricsService = {
     metrics.totalPackets++;
     metrics.lastSeqNum = seqNum;
 
-    // Loss Oranı Hesapla
+    // Gerçek Hesaplanan Kayıp Oranı
     const totalSent = metrics.totalPackets + metrics.lostPackets;
-    const packetLoss = (metrics.lostPackets / totalSent) * 100;
+    let calculatedLoss = 0;
+    if (totalSent > 0) {
+      calculatedLoss = (metrics.lostPackets / totalSent) * 100;
+    }
 
-    // --- 2. JITTER ---
+    // SİMÜLASYON ETKİSİ: Gerçek kayıp ile simülasyon kaybından hangisi büyükse onu al
+    // (Böylece slider'ı artırınca loss artar, azaltınca gerçek değere döner)
+    const finalPacketLoss = Math.max(calculatedLoss, simulatedMetrics.packetLoss || 0);
+
+    // --- 2. JITTER HESABI ---
     const timeDiff = (serverTimestamp - metrics.prevServerTime) - (clientTimestamp - metrics.prevClientTime);
-    // Exponential Moving Average (EMA) ile yumuşatma
-    metrics.jitter = metrics.jitter + (Math.abs(timeDiff) - metrics.jitter) / 16;
 
+    // Gerçek Jitter (EMA ile yumuşatma)
+    let calculatedJitter = metrics.jitter + (Math.abs(timeDiff) - metrics.jitter) / 16;
+
+    // SİMÜLASYON ETKİSİ: Jitter üzerine ekleme yap
+    const finalJitter = calculatedJitter + (simulatedMetrics.jitter || 0);
+
+    // Durum değişkenlerini güncelle (Gerçek değerleri sakla ki hesap şaşmasın)
+    metrics.jitter = calculatedJitter;
     metrics.prevServerTime = serverTimestamp;
     metrics.prevClientTime = clientTimestamp;
 
     // --- 3. HEALTH SCORE (Canlı Hesaplama) ---
-    metrics.healthScore = this.calculateHealthScore(metrics.jitter, packetLoss);
+    // Hesaplamada son kararlaştırılan (final) değerleri kullan
+    metrics.healthScore = this.calculateHealthScore(finalJitter, finalPacketLoss);
 
     // Güncel veriyi Map'e kaydet
     clientsMetrics.set(socketId, metrics);
 
     // --- 4. REDIS'E KAYDET ---
     const redisData = JSON.stringify({
-      sessionId: metrics.sessionId, 
-      jitter: metrics.jitter.toFixed(2),
-      packetLoss: packetLoss.toFixed(2),
+      sessionId: metrics.sessionId,
+      jitter: finalJitter.toFixed(2),        // DÜZELTME: finalJitter kullanıldı
+      packetLoss: finalPacketLoss.toFixed(2), // DÜZELTME: finalPacketLoss kullanıldı
       score: metrics.healthScore,
       lastUpdated: Date.now()
     });
@@ -97,12 +107,11 @@ const metricsService = {
     });
 
     // --- RETURN ---
-    // Buradan dönen veri qosService'e gidecek
     return {
-      socketId: socketId,        
-      sessionId: metrics.sessionId, 
-      jitter: parseFloat(metrics.jitter.toFixed(3)),
-      packetLoss: parseFloat(packetLoss.toFixed(2)),
+      socketId: socketId,
+      sessionId: metrics.sessionId,
+      jitter: parseFloat(finalJitter.toFixed(3)),
+      packetLoss: parseFloat(finalPacketLoss.toFixed(2)),
       healthScore: metrics.healthScore
     };
   },

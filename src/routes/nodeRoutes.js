@@ -1,42 +1,57 @@
 const express = require('express');
 const router = express.Router();
 const { redisClient } = require('../config/redis');
+const auth = require('../middleware/auth');
 
-// Dosya ismine dikkat (nodeManagerService veya NodeManagerService)
-// Senin dosya yapına göre doğrusunu seç:
-const nodeManager = require('../services/nodeManager'); 
 
-// @desc    Aktif Node'ları Listele
-// @route   GET /api/nodes/available
-router.get('/available', async (req, res) => {
-  try {
-    
-    const nodeIds = await redisClient.smembers('active_nodes'); 
-    
-    const nodes = [];
-    
-    for (const id of nodeIds) {
-        
-        const info = await redisClient.hgetall(`node:${id}`);
-        
-        if (info && Object.keys(info).length > 0) {
-            nodes.push(info);
+router.get('/available', auth, async (req, res) => {
+    try {
+        const nodeIds = await redisClient.smembers('active_nodes');
+        const nodes = [];
+
+        // Şimdiki zamanı al
+        const NOW = Date.now();
+        // Tolerans süresi (Örn: 30 saniye). Node 30 sn boyunca heartbeat atmazsa ölü sayılır.
+        const TIMEOUT_MS = 30 * 1000;
+
+        for (const id of nodeIds) {
+            const info = await redisClient.hgetall(`node:${id}`);
+
+            // KONTROL 1: Veri hiç yoksa (Redis'ten silinmişse)
+            if (!info || Object.keys(info).length === 0) {
+                await redisClient.srem('active_nodes', id);
+                console.log(`Verisi olmayan node temizlendi: ${id}`);
+                continue; // Döngüyü pas geç
+            }
+
+            // KONTROL 2: Veri var ama ÇOK ESKİ mi? (Zombi Kontrolü)
+            // lastSeen verisini sayıya çeviriyoruz
+            const lastSeen = Number(info.lastSeen);
+
+            if (NOW - lastSeen > TIMEOUT_MS) {
+                // Node çok uzun süredir sessiz, ölü kabul et ve sil
+                await redisClient.srem('active_nodes', id);
+                await redisClient.del(`node:${id}`); // Hash verisini de temizle
+                console.log(`Zombi node (Süresi Dolmuş) temizlendi: ${id}`);
+            } else {
+                // Node hem var hem de taze, listeye ekle
+                nodes.push(info);
+            }
         }
-    }
 
-    res.status(200).json({
-      success: true,
-      count: nodes.length,
-      data: nodes
-    });
-  } catch (error) {
-    console.error('Node List Hatası:', error);
-    res.status(500).json({ message: 'Node listesi alınamadı' });
-  }
+        res.status(200).json({
+            success: true,
+            count: nodes.length,
+            data: nodes
+        });
+    } catch (error) {
+        console.error('Node List Hatası:', error);
+        res.status(500).json({ message: 'Node listesi alınamadı' });
+    }
 });
 
 // @desc    Node Sağlık Kontrolü
-router.get('/:id/health', (req, res) => {
+router.get('/:id/health', auth, (req, res) => {
     res.status(200).json({
         nodeId: req.params.id,
         status: 'Healthy ',
@@ -45,10 +60,10 @@ router.get('/:id/health', (req, res) => {
 });
 
 // @desc    Chaos Monkey: Node'u öldür
-router.post('/register', async (req, res) => {
+router.post('/register', auth, async (req, res) => {
     try {
         const { ip, port, type } = req.body;
-        
+
         // Basit validasyon
         if (!ip || !port) {
             return res.status(400).json({ message: 'IP ve Port gerekli!' });
