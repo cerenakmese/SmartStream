@@ -57,44 +57,34 @@ const sessionStateService = {
   // --- 2. OTURUM BİLGİSİ ÇEKME ---
   async getSessionState(sessionId) {
     const key = `${SESSION_PREFIX}${sessionId}`;
-
-    // 1. Sadece Oku (Redis'te ne yazıyorsa gerçek odur)
     const data = await redisClient.hgetall(key);
 
     if (!data || Object.keys(data).length === 0) return null;
 
-    // 2. Verileri Parse Et
     try {
       if (data.participants) data.participants = JSON.parse(data.participants);
 
-      let metricsObj = {};
+      // Sadece JSON parse yapıyoruz, QoS hesabı burada YAPMIYORUZ.
       if (data.networkMetrics) {
-        metricsObj = JSON.parse(data.networkMetrics);
-        data.networkMetrics = metricsObj;
+        data.networkMetrics = JSON.parse(data.networkMetrics);
       }
-
-      // 3. (Opsiyonel) UI için QoS Etiketi Ekle 
-      // Redis'i güncellemeden, sadece kullanıcıya dönerken süslü gösteriyoruz.
-      if (qosService && qosService.decideQualityPolicy) {
-        const decision = qosService.decideQualityPolicy(metricsObj);
-
-        let uiLabel = 'UNKNOWN ⚪';
-        if (decision.status === 'STABLE') uiLabel = 'EXCELLENT 🟢';
-        else if (decision.status === 'WARNING') uiLabel = 'FAIR 🟠';
-        else if (decision.status === 'CRITICAL') uiLabel = 'CRITICAL 🔴';
-
-        data.qos = {
-          status: uiLabel,
-          details: decision
-        };
-      }
-
-    } catch (e) {
-      console.error('Parse Error:', e);
-    }
+    } catch (e) { console.error('Parse Error:', e); }
 
     return data;
   },
+
+  // --- 2. METRİK GÜNCELLEME (YENİ - SİMÜLASYON İÇİN) ---
+  async updateSessionMetrics(sessionId, newMetrics) {
+    const key = `${SESSION_PREFIX}${sessionId}`;
+    const exists = await redisClient.exists(key);
+    if (!exists) throw new Error('Oturum bulunamadı.');
+
+    // Yeni metrikleri Redis'e yazıyoruz
+    await redisClient.hset(key, 'networkMetrics', JSON.stringify(newMetrics));
+    return newMetrics;
+  },
+
+
   // --- 3. KATILIMCI EKLEME ---
   async addParticipant(sessionId, user) {
     const key = `${SESSION_PREFIX}${sessionId}`;

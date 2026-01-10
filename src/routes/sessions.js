@@ -29,4 +29,6 @@ router.post('/:id/leave', auth, sessionController.leaveSession);
 // POST /api/sessions/:id/heartbeat
 router.post('/:id/heartbeat', auth, sessionController.heartbeat);
 
+router.post('/:id/simulate-metrics', auth, sessionController.simulateMetrics);
+
 module.exports = router;

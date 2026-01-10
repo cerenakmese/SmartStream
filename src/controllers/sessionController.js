@@ -1,5 +1,7 @@
 const sessionStateService = require('../services/sessionState');
 const { redisClient } = require('../config/redis');
+const metricsService = require('../services/metricsService');
+const qosService = require('../services/qosService');
 
 // 1. POST /api/sessions/init
 exports.createSession = async (req, res) => {
@@ -104,16 +106,61 @@ exports.heartbeat = async (req, res) => {
   }
 };
 
-// 4. GET /api/sessions/:id/state
+exports.simulateMetrics = async (req, res) => {
+  try {
+    const { id } = req.params; // Session ID
+    const { jitter, packetLoss } = req.body; // Sadece ham veri gelir
+
+    if (typeof jitter === 'undefined' || typeof packetLoss === 'undefined') {
+      return res.status(400).json({ success: false, message: 'jitter ve packetLoss gereklidir.' });
+    }
+
+    // 1. Puanı Hesapla (Mevcut mantığı kullanıyoruz, yeniden yazmıyoruz)
+    const healthScore = metricsService.calculateHealthScore(Number(jitter), Number(packetLoss));
+
+    // 2. Güncellenecek Veriyi Hazırla
+    const simulatedMetrics = {
+      jitter: Number(jitter),
+      packetLoss: Number(packetLoss),
+      healthScore: healthScore,
+      isSimulated: true // UI'da bunun test verisi olduğunu anlamak için
+    };
+
+    // 3. Veritabanına Yaz (Controller işi yapmaz, servise yaptırır)
+    await sessionStateService.updateSessionMetrics(id, simulatedMetrics);
+
+    res.status(200).json({
+      success: true,
+      message: 'Simülasyon güncellendi.',
+      data: simulatedMetrics
+    });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// --- GÜNCELLENEN: DURUM SORGULAMA ---
 exports.getSessionState = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // 1. Ham Veriyi Çek
     const state = await sessionStateService.getSessionState(id);
 
     if (!state) {
       return res.status(404).json({ success: false, error: 'Oturum bulunamadı.' });
     }
+
+    // 2. QoS Kararını İste (Modüler Yapı)
+    // Controller, elindeki metriği QoS servisine verir ve "Kararın nedir?" der.
+    if (state.networkMetrics) {
+      // Biz JSON uydurmuyoruz, servis ne dönerse onu ekliyoruz.
+      state.qosDecision = qosService.decideQualityPolicy(state.networkMetrics);
+    }
+
     res.status(200).json({ success: true, data: state });
+
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
