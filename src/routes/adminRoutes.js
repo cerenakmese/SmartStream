@@ -2,13 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { redisClient } = require('../config/redis');
 const auth = require('../middleware/auth');
-//const admin = require('../middleware/admin');
+const admin = require('../middleware/admin');
 
 const NODE_ID = process.env.HOSTNAME || 'localhost';
 
 
-// 1. Sistem Durumunu Getir
-router.get('/nodes', auth, async (req, res) => {
+
+router.get('/nodes', auth, admin, async (req, res) => {
     try {
         const nodes = await redisClient.smembers('active_nodes');
         res.json({
@@ -21,7 +21,7 @@ router.get('/nodes', auth, async (req, res) => {
 });
 
 
-router.post('/kill/:nodeId', auth, async (req, res) => {
+router.post('/kill/:nodeId', auth, admin, async (req, res) => {
     try {
         // URL'den ID'yi alıyoruz (örn: smartstream-api-1)
         const targetNodeId = req.params.nodeId;
@@ -48,7 +48,7 @@ router.post('/kill/:nodeId', auth, async (req, res) => {
 
 // 2. Belirli Bir Node'u Dirilt (ANTIDOTE)
 // Kullanım: POST /api/admin/revive/smartstream-api-1
-router.post('/revive/:nodeId', auth, async (req, res) => {
+router.post('/revive/:nodeId', auth, admin, async (req, res) => {
     try {
         const targetNodeId = req.params.nodeId;
 

@@ -46,6 +46,16 @@ exports.createSession = async (req, res) => {
       selectedNodeId
     );
 
+    const user = {
+      userId: hostId,
+      username: (req.user && req.user.username) ? req.user.username : 'Host'
+    };
+    await sessionStateService.addParticipant(sessionId, user);
+
+    if (session) {
+      session.participants = [user];
+    }
+
     res.status(201).json({
       success: true,
       sessionId: sessionId,

@@ -89,7 +89,7 @@ exports.login = async (req, res) => {
 
     // 4. Token üret
     const secret = process.env.JWT_SECRET || 'gizli_anahtar';
-    const token = jwt.sign({ id: user.id }, secret, {
+    const token = jwt.sign({ id: user.id, role: user.role }, secret, {
       expiresIn: '1d'
     });
 
@@ -100,7 +100,8 @@ exports.login = async (req, res) => {
       user: {
         id: user.id,
         username: user.username,
-        email: user.email
+        email: user.email,
+        role: user.role
       }
     });
 

@@ -9,6 +9,8 @@ const RECOVERY_TTL = 120; // 2 dakika (Bağlantı koptuktan sonra 2 dk hatırla)
 
 const sessionStateService = {
 
+
+
   // --- 1. OTURUM OLUŞTURMA ---
   async createSessionState(sessionId, hostId, nodeId) {
     const lockKey = `locks:create-session:${sessionId}`;
@@ -54,17 +56,45 @@ const sessionStateService = {
 
   // --- 2. OTURUM BİLGİSİ ÇEKME ---
   async getSessionState(sessionId) {
-    const data = await redisClient.hgetall(`${SESSION_PREFIX}${sessionId}`);
+    const key = `${SESSION_PREFIX}${sessionId}`;
+
+    // 1. Sadece Oku (Redis'te ne yazıyorsa gerçek odur)
+    const data = await redisClient.hgetall(key);
+
     if (!data || Object.keys(data).length === 0) return null;
 
+    // 2. Verileri Parse Et
     try {
       if (data.participants) data.participants = JSON.parse(data.participants);
-      if (data.networkMetrics) data.networkMetrics = JSON.parse(data.networkMetrics);
-    } catch (e) { console.error('Parse Error:', e); }
+
+      let metricsObj = {};
+      if (data.networkMetrics) {
+        metricsObj = JSON.parse(data.networkMetrics);
+        data.networkMetrics = metricsObj;
+      }
+
+      // 3. (Opsiyonel) UI için QoS Etiketi Ekle 
+      // Redis'i güncellemeden, sadece kullanıcıya dönerken süslü gösteriyoruz.
+      if (qosService && qosService.decideQualityPolicy) {
+        const decision = qosService.decideQualityPolicy(metricsObj);
+
+        let uiLabel = 'UNKNOWN ⚪';
+        if (decision.status === 'STABLE') uiLabel = 'EXCELLENT 🟢';
+        else if (decision.status === 'WARNING') uiLabel = 'FAIR 🟠';
+        else if (decision.status === 'CRITICAL') uiLabel = 'CRITICAL 🔴';
+
+        data.qos = {
+          status: uiLabel,
+          details: decision
+        };
+      }
+
+    } catch (e) {
+      console.error('Parse Error:', e);
+    }
 
     return data;
   },
-
   // --- 3. KATILIMCI EKLEME ---
   async addParticipant(sessionId, user) {
     const key = `${SESSION_PREFIX}${sessionId}`;
@@ -111,6 +141,12 @@ const sessionStateService = {
       participants = JSON.parse(data);
       participants = participants.filter(p => p.userId !== userId);
       await redisClient.hset(key, 'participants', JSON.stringify(participants));
+
+      if (participants.length === 0) {
+        console.log(`[Session] Oda boşaldı, otomatik kapatılıyor: ${sessionId}`);
+        await this.deleteSession(sessionId); // Odayı yok et
+        return; // İşlem bitti
+      }
     }
 
     // Kullanıcı bilerek çıkış yaptıysa (Logout), recovery bilgisini silmeliyiz.
