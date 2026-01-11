@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const metricsService = require('../services/metricsService');
+const http = require('http');
 const mongoose = require('mongoose');
 const { redisClient } = require('../config/redis');
 const auth = require('../middleware/auth');
@@ -8,59 +8,90 @@ const os = require('os');
 const analyticsService = require('../services/analyticsService');
 const admin = require('../middleware/admin');
 
+const CONTAINER_MAP = {
+    'node-primary': 'smartstream-api-1',
+    'node-backup': 'smartstream-api-2',
+    'node-backup-2': 'smartstream-api-3',
+    'smartstream-api-1': 'smartstream-api-1',
+    'smartstream-api-2': 'smartstream-api-2',
+    'smartstream-api-3': 'smartstream-api-3'
+};
+
+function sendDockerCommand(action, containerName) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            socketPath: '/var/run/docker.sock',
+            path: `/containers/${containerName}/${action}`, // action: 'start' veya 'stop'
+            method: 'POST'
+        };
+
+        const req = http.request(options, (res) => {
+            if (res.statusCode === 204 || res.statusCode === 304) {
+                resolve(true);
+            } else {
+                let body = '';
+                res.on('data', chunk => body += chunk);
+                res.on('end', () => reject(new Error(`Docker Error ${res.statusCode}: ${body}`)));
+            }
+        });
+
+        req.on('error', (err) => reject(err));
+        req.end();
+    });
+}
 
 
 router.post('/kill/:nodeId', auth, admin, async (req, res) => {
     try {
-        // URL'den ID'yi alıyoruz (örn: smartstream-api-1)
         const targetNodeId = req.params.nodeId;
+        const containerName = CONTAINER_MAP[targetNodeId];
 
-        if (!targetNodeId) {
-            return res.status(400).json({ message: 'Node ID gereklidir.' });
+        if (!containerName) {
+            return res.status(400).json({ message: 'Geçersiz Node ID' });
         }
 
-        const currentNode = process.env.NODE_ID;
-        if (targetNodeId === currentNode) {
-            return res.status(400).json({
-                success: false,
-                message: 'Kendini öldüremezsin! Lütfen worker nodunu hedef al.'
-            });
+        // Kendini öldürmeye çalışıyorsa uyar (Opsiyonel)
+        if (process.env.HOSTNAME === containerName) {
+            return res.status(400).json({ message: 'Admin paneli kendini kapatamaz. Başka node üzerinden deneyin.' });
         }
 
-        // Redis'e bu ID için "Zehir" bırakıyoruz
-        await redisClient.set(`poison:${targetNodeId}`, 'true');
+        console.log(`[Admin] ${targetNodeId} (${containerName}) için durdurma emri veriliyor...`);
 
-        console.log(`[Admin]  ${targetNodeId} öldürüldü.`);
+        // Docker'a "STOP" komutu yolla
+        await sendDockerCommand('stop', containerName);
 
         res.json({
             success: true,
-            message: ` ${targetNodeId} hedeflendi ve durduruluyor.`,
+            message: `${targetNodeId} fiziksel olarak durduruldu. (Status: Exited)`,
             target: targetNodeId,
-            action: 'POISON_PILL_SET'
+            action: 'KILL_PHYSICAL'
         });
+
     } catch (e) {
+        console.error(e);
         res.status(500).json({ error: e.message });
     }
 });
 
-// 2. Belirli Bir Node'u Dirilt (ANTIDOTE)
-// Kullanım: POST /api/admin/revive/smartstream-api-1
 router.post('/revive/:nodeId', auth, admin, async (req, res) => {
     try {
         const targetNodeId = req.params.nodeId;
+        const containerName = CONTAINER_MAP[targetNodeId];
 
-        // Redis'teki zehri siliyoruz
-        await redisClient.del(`poison:${targetNodeId}`);
+        if (!containerName) return res.status(404).json({ error: 'Bilinmeyen Node ID' });
 
-        console.log(`[Admin]  ${targetNodeId} çalıştı.`);
+        console.log(`[Admin] ${targetNodeId} canlandırılıyor...`);
+
+        // Docker'a "START" komutu yolla
+        await sendDockerCommand('start', containerName);
 
         res.json({
             success: true,
-            message: `${targetNodeId} tekrar sisteme dönebilir.`,
-            target: targetNodeId,
-            action: 'POISON_PILL_REMOVED'
+            message: ` ${targetNodeId} (${containerName}) fiziksel olarak başlatıldı!`,
+            action: 'DOCKER_START'
         });
     } catch (e) {
+        console.error(e);
         res.status(500).json({ error: e.message });
     }
 });

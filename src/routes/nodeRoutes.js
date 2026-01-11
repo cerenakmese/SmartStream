@@ -58,7 +58,7 @@ router.get('/:id/health', auth, async (req, res) => {
 
         // 1. Önce Veriyi Çek (Redis'te ne var ne yok görelim)
         const nodeData = await redisClient.hgetall(`node:${targetNodeId}`);
-        const isPoisoned = await redisClient.get(`poison:${targetNodeId}`);
+
 
         // Eğer Node verisi hiç yoksa (Offline/Silinmiş)
         if (!nodeData || Object.keys(nodeData).length === 0) {
@@ -73,18 +73,9 @@ router.get('/:id/health', auth, async (req, res) => {
         const redisStatus = nodeData.status || 'unknown';
         const lastSeen = nodeData.lastSeen ? Number(nodeData.lastSeen) : 0;
 
-        // --- SENARYO A: ZEHİRLENMİŞ (POISONED) ---
-        if (isPoisoned) {
-            return res.status(503).json({
-                success: false,
-                nodeId: targetNodeId,
-                status: redisStatus, // "active" yazıyorsa "active" döner
 
-                message: 'Admin tarafından durduruldu.'
-            });
-        }
 
-        // --- SENARYO B: ZOMBIE (TIMEOUT) ---
+        // --- SENARYO a: ZOMBIE (TIMEOUT) ---
         if (NOW - lastSeen > TIMEOUT_MS) {
             return res.status(503).json({
                 success: false,
@@ -94,7 +85,7 @@ router.get('/:id/health', auth, async (req, res) => {
             });
         }
 
-        // --- SENARYO C: SAĞLIKLI ---
+        // --- SENARYO b: SAĞLIKLI ---
         res.status(200).json({
             success: true,
             nodeId: targetNodeId,

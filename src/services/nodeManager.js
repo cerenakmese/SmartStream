@@ -62,33 +62,14 @@ class NodeManagerService {
      */
     async checkAndBeat() {
         try {
-            // ZEHİR KONTROLÜ
-            const isPoisoned = await redisClient.get(`poison:${NODE_ID}`);
 
-            if (isPoisoned) {
-                // Eğer daha önce aktifse logla ve kapat
-                if (this.isActive) {
-                    console.warn(`[NodeManager] Öldürüldü. Process sonlandırılıyor...`);
-
-                    this.isActive = false;
-                    await redisClient.srem('active_nodes', NODE_ID);
-                    await redisClient.del(`node:${NODE_ID}`);
-
-                    setTimeout(() => {
-                        console.log(`[NodeManager] (Exit Code 1)`);
-                        process.exit(1); // 1: Hata ile çıkış (Crash simülasyonu)
-                    }, 100);
-                    // ----------------------------
-                }
-                return;
-            }
 
             // SİMÜLASYON KONTROLÜ
             if (this.isSimulatedDead) return;
 
             // DİRİLME KONTROLÜ (Auto-Revive)
             if (!this.isActive) {
-                console.log(`[NodeManager] 🚑 İYİLEŞTİM! Tekrar göreve dönüyorum.`);
+                console.log(`[NodeManager]  Canlandı. Göreve dönüyor.`);
                 this.isActive = true;
                 await this.registerNode();
 

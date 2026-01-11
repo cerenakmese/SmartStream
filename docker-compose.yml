@@ -20,6 +20,8 @@ services:
       - mongo
     networks:
       - smartstream_net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: no
 
   # --- SUNUCU 2 (Yedek Sunucu - Port 3001) ---
@@ -41,6 +43,9 @@ services:
       - mongo
     networks:
       - smartstream_net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
     restart: no
 
   api-3:
@@ -61,6 +66,8 @@ services:
       - mongo
     networks:
       - smartstream_net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: no
 
   # --- Redis Stack ---
