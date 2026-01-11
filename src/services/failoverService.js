@@ -46,9 +46,8 @@ class FailoverService {
                     });
                 }
 
-                // SENARYO 2: Node GERİ GELMİŞ ama veri 'Error' -> DÜZELT
                 else if (isNodeAlive && sessionData.status === 'network_error') {
-                    console.log(`[HealthCheck] Node (${sessionData.nodeId}) geri geldi! Session (${sessionData.id}) iyileştiriliyor.`);
+                    console.log(`[HealthCheck] Node (${sessionData.nodeId}) oturumu aldı. Session (${sessionData.id}) iyileştiriliyor.`);
 
                     const healthyMetrics = JSON.stringify({ healthScore: 100, packetLoss: 0, jitter: 0, bandwidth: 0 });
 
@@ -127,17 +126,18 @@ class FailoverService {
                         const lock = await redlock.acquire([lockKey], 3000);
 
 
-                        console.log(`[Failover]  Yetim oturum bulundu: ${sessionData.id} (Eski Sahip: ${sessionData.nodeId}) -> Bana Geçiyor`);
+                        console.log(`[Failover] Boşta oturum bulundu: ${sessionData.id} (Eski Sahip: ${sessionData.nodeId}) -> Bana Geçiyor`);
 
                         await redisClient.hset(key, {
                             nodeId: NODE_ID,
                             lastMigration: Date.now()
                         });
                         await redisClient.expire(key, 3600);
+                        await redisClient.hincrby(`node:${NODE_ID}`, 'load', 1);
 
                         await lock.release();
                     } catch (e) {
-                        // Kilit alınamadı, başka biri alıyor olabilir
+
                     }
                 }
             }
@@ -159,6 +159,7 @@ class FailoverService {
                     lastMigration: Date.now()
                 });
                 await redisClient.expire(key, 3600);
+                await redisClient.hincrby(`node:${NODE_ID}`, 'load', 1);
 
                 count++;
                 console.log(`[Failover]  Oturum kurtarıldı: ${sessionData.id || key} -> ${NODE_ID}`);

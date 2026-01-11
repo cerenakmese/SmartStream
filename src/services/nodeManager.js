@@ -20,7 +20,7 @@ class NodeManagerService {
      */
     async startHeartbeat() {
         if (!this.isActive) {
-            console.log(`[NodeManager] 💓 Heartbeat başlatıldı: ${NODE_ID}`);
+            console.log(`[NodeManager]  Heartbeat başlatıldı: ${NODE_ID}`);
             this.isActive = true;
         }
 
@@ -44,7 +44,7 @@ class NodeManagerService {
                 // Servisi dinamik olarak al
                 const failover = require('./failoverService');
 
-                console.log(`[NodeManager] 🔍 Başlangıç taraması: Sahipsiz oturumlar kontrol ediliyor...`);
+
 
                 // Failover servisindeki yetim toplama fonksiyonunu çalıştır
                 // (İsmi reclaimOrphanedSessions olarak belirlemiştik)
@@ -66,10 +66,19 @@ class NodeManagerService {
             const isPoisoned = await redisClient.get(`poison:${NODE_ID}`);
 
             if (isPoisoned) {
+                // Eğer daha önce aktifse logla ve kapat
                 if (this.isActive) {
-                    console.warn(`[NodeManager] 💀 ZEHİRLENDİM! (Poison Pill). Heartbeat durduruluyor...`);
+                    console.warn(`[NodeManager] Öldürüldü. Process sonlandırılıyor...`);
+
                     this.isActive = false;
                     await redisClient.srem('active_nodes', NODE_ID);
+                    await redisClient.del(`node:${NODE_ID}`);
+
+                    setTimeout(() => {
+                        console.log(`[NodeManager] (Exit Code 1)`);
+                        process.exit(1); // 1: Hata ile çıkış (Crash simülasyonu)
+                    }, 100);
+                    // ----------------------------
                 }
                 return;
             }
@@ -109,8 +118,9 @@ class NodeManagerService {
 
         await redisClient.hset(key, nodeInfo);
         await redisClient.sadd('active_nodes', NODE_ID);
-        await redisClient.sadd('known_nodes', NODE_ID); // Kütük listesi
+        await redisClient.sadd('known_nodes', NODE_ID);
         await redisClient.expire(key, NODE_TTL);
+        console.log(`[NodeManager] Node sisteme kaydedildi: ${NODE_ID}`);
     }
 
     async updateHeartbeat() {

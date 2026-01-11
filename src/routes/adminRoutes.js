@@ -8,21 +8,6 @@ const os = require('os');
 const analyticsService = require('../services/analyticsService');
 const admin = require('../middleware/admin');
 
-const NODE_ID = process.env.HOSTNAME || 'localhost';
-
-
-
-router.get('/nodes', auth, admin, async (req, res) => {
-    try {
-        const nodes = await redisClient.smembers('active_nodes');
-        res.json({
-            activeNodes: nodes,
-            currentNode: NODE_ID
-        });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
 
 
 router.post('/kill/:nodeId', auth, admin, async (req, res) => {
@@ -34,14 +19,22 @@ router.post('/kill/:nodeId', auth, admin, async (req, res) => {
             return res.status(400).json({ message: 'Node ID gereklidir.' });
         }
 
+        const currentNode = process.env.NODE_ID;
+        if (targetNodeId === currentNode) {
+            return res.status(400).json({
+                success: false,
+                message: 'Kendini öldüremezsin! Lütfen worker nodunu hedef al.'
+            });
+        }
+
         // Redis'e bu ID için "Zehir" bırakıyoruz
         await redisClient.set(`poison:${targetNodeId}`, 'true');
 
-        console.log(`[Admin] 🔫 ${targetNodeId} için öldürüldü.`);
+        console.log(`[Admin]  ${targetNodeId} öldürüldü.`);
 
         res.json({
             success: true,
-            message: `🚨 ${targetNodeId} hedeflendi ve durduruluyor.`,
+            message: ` ${targetNodeId} hedeflendi ve durduruluyor.`,
             target: targetNodeId,
             action: 'POISON_PILL_SET'
         });
@@ -59,11 +52,11 @@ router.post('/revive/:nodeId', auth, admin, async (req, res) => {
         // Redis'teki zehri siliyoruz
         await redisClient.del(`poison:${targetNodeId}`);
 
-        console.log(`[Admin]  ${targetNodeId} için çalıştı.`);
+        console.log(`[Admin]  ${targetNodeId} çalıştı.`);
 
         res.json({
             success: true,
-            message: `♻️ ${targetNodeId} tekrar sisteme dönebilir.`,
+            message: `${targetNodeId} tekrar sisteme dönebilir.`,
             target: targetNodeId,
             action: 'POISON_PILL_REMOVED'
         });

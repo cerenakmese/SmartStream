@@ -12,7 +12,8 @@ exports.createSession = async (req, res) => {
     const hostId = req.user.userId || req.user.id || req.user._id;
 
     // 1. Redis'teki Aktif Node'ları Çek
-    const activeNodeIds = await redisClient.smembers('active_nodes');
+    let activeNodeIds = await redisClient.smembers('active_nodes');
+    activeNodeIds = activeNodeIds.filter(id => id !== 'node-primary');
 
     let selectedNodeId = null;
 
@@ -31,8 +32,7 @@ exports.createSession = async (req, res) => {
         }
       }
 
-      // Seçilen işçinin yükünü artır
-      await redisClient.hincrby(`node:${selectedNodeId}`, 'load', 1);
+
       console.log(`Session, Worker Node'a atandı: ${selectedNodeId}`);
 
     } else {

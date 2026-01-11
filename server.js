@@ -91,6 +91,11 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
     }
 });
 
+
+
+
+
+
 // 7. Graceful Shutdown
 process.on('SIGTERM', shutDown);
 process.on('SIGINT', shutDown);
@@ -107,5 +112,9 @@ async function shutDown() {
     if (subClient.isOpen) await subClient.quit();
 
     process.exit(0);
+
+
+
+
 }
 

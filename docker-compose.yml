@@ -20,7 +20,7 @@ services:
       - mongo
     networks:
       - smartstream_net
-    restart: on-failure
+    restart: no
 
   # --- SUNUCU 2 (Yedek Sunucu - Port 3001) ---
   api-2:
@@ -41,7 +41,27 @@ services:
       - mongo
     networks:
       - smartstream_net
-    restart: on-failure
+    restart: no
+
+  api-3:
+    build: .
+    image: resilient-stream-api
+    container_name: smartstream-api-3
+    ports:
+      - "3002:3000"
+    environment:
+      - PORT=3000
+      - HOSTNAME=node-backup-2
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MONGO_URI=mongodb://mongo:27017/smartstream
+      - JWT_SECRET=d14ae31a3472f106d55af1ec43baf751eefbde2a6370c80113ba0a4b56447ab4f85ee3f2cf169c0cbb9af382d16399304856b3e7deea248e5a35178fffebe8aa
+    depends_on:
+      - redis
+      - mongo
+    networks:
+      - smartstream_net
+    restart: no
 
   # --- Redis Stack ---
   redis:

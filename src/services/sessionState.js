@@ -2,6 +2,7 @@ const { redisClient, redlock } = require('../config/redis');
 const SessionModel = require('../models/Session');
 const qosEngine = require('./qosEngine');
 const User = require('../models/User');
+const analyticsService = require('./analyticsService');
 
 const SESSION_PREFIX = 'session:';
 const SESSION_TTL = 3600; // 1 saat
@@ -23,30 +24,45 @@ const sessionStateService = {
       const exists = await redisClient.exists(`${SESSION_PREFIX}${sessionId}`);
       if (exists) throw new Error('Bu ID ile zaten aktif bir oturum var.');
 
+      // KULLANICI GÜNCELLEMESİ: Node ID gelmezse varsayılan olarak 'smartstream-api-2' ata
+      // (Not: Docker Compose'daki HOSTNAME ile uyumlu olduğundan emin ol)
+      const targetNode = nodeId || 'smartstream-api-2';
+
       const sessionData = {
         id: sessionId,
         hostId: hostId,
-        nodeId: nodeId,
+        nodeId: targetNode,
         createdAt: Date.now(),
         status: 'active',
-        networkMetrics: JSON.stringify({ jitter: 0, packetLoss: 0, bandwidth: 0, healthScore: 100 }),
+        networkMetrics: JSON.stringify({ jitter: 0, packetLoss: 0, healthScore: 100 }),
         participants: JSON.stringify([])
       };
 
       await redisClient.hmset(`${SESSION_PREFIX}${sessionId}`, sessionData);
       await redisClient.expire(`${SESSION_PREFIX}${sessionId}`, SESSION_TTL);
 
+      if (targetNode && targetNode !== 'none') {
+        await redisClient.hincrby(`node:${targetNode}`, 'load', 1);
+        console.log(`[SessionState] Node Yükü Artırıldı: ${targetNode}`);
+      }
+
       const newSessionLog = new SessionModel({
         sessionId: sessionId,
         hostId: hostId,
-        nodeId: nodeId,
+        nodeId: targetNode,
         status: 'active',
         startTime: new Date()
       });
       await newSessionLog.save();
-      console.log(`[MongoDB] Yeni Session Kaydedildi: ${sessionId}`);
+      console.log(`[MongoDB] Yeni Session Kaydedildi: ${sessionId} (Node: ${targetNode})`);
+      analyticsService.logSessionStart(sessionId, targetNode).catch(err => console.error(err));
 
-      return { ...sessionData, participants: [], networkMetrics: { jitter: 0, packetLoss: 0, healthScore: 100 } };
+      return {
+        ...sessionData,
+        participants: [],
+        userExperiences: [], // Frontend uyumluluğu için
+        networkMetrics: { jitter: 0, packetLoss: 0, healthScore: 100 }
+      };
 
     } catch (error) {
       console.error('Create Session Error:', error);
@@ -55,6 +71,7 @@ const sessionStateService = {
       if (lock) await lock.release().catch(e => { });
     }
   },
+
 
   async getSessionState(sessionId) {
     const key = `${SESSION_PREFIX}${sessionId}`;
@@ -247,6 +264,11 @@ const sessionStateService = {
 
     // 4. Redis'ten Sil
     await redisClient.del(key);
+
+    if (assignedNodeId && assignedNodeId !== 'none') {
+      await redisClient.hincrby(`node:${assignedNodeId}`, 'load', -1);
+      console.log(`[SessionState] 📉 Node Yükü Azaltıldı: ${assignedNodeId}`);
+    }
 
     // 5. MongoDB'ye "Final Raporu" ile Kaydet
     await SessionModel.findOneAndUpdate(
