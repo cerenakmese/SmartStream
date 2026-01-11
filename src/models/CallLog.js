@@ -39,4 +39,6 @@ const CallLogSchema = new mongoose.Schema({
   }
 });
 
+CallLogSchema.index({ timestamp: 1 }, { expireAfterSeconds: 3600 }); // 1 saat sonra otomatik silinsin
+
 module.exports = mongoose.model('CallLog', CallLogSchema);

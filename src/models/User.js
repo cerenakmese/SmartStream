@@ -31,7 +31,15 @@ const UserSchema = new mongoose.Schema({
     type: String,
     enum: ['user', 'admin'],
     default: 'user'
-  }
+  },
+
+  settings: {
+    qosPreference: {
+      type: String,
+      enum: ['balanced', 'audio-only', 'always-video', 'video-only'],
+      default: 'balanced'
+    }
+  },
 });
 
 module.exports = mongoose.model('User', UserSchema);

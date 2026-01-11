@@ -1,5 +1,8 @@
 const { redisClient, redlock } = require('../config/redis');
 const SessionModel = require('../models/Session');
+const qosEngine = require('./qosEngine');
+const User = require('../models/User');
+const analyticsService = require('./analyticsService');
 
 const SESSION_PREFIX = 'session:';
 const SESSION_TTL = 3600; // 1 saat
@@ -21,30 +24,45 @@ const sessionStateService = {
       const exists = await redisClient.exists(`${SESSION_PREFIX}${sessionId}`);
       if (exists) throw new Error('Bu ID ile zaten aktif bir oturum var.');
 
+      // KULLANICI GÜNCELLEMESİ: Node ID gelmezse varsayılan olarak 'smartstream-api-2' ata
+      // (Not: Docker Compose'daki HOSTNAME ile uyumlu olduğundan emin ol)
+      const targetNode = nodeId || 'smartstream-api-2';
+
       const sessionData = {
         id: sessionId,
         hostId: hostId,
-        nodeId: nodeId,
+        nodeId: targetNode,
         createdAt: Date.now(),
         status: 'active',
-        networkMetrics: JSON.stringify({ jitter: 0, packetLoss: 0, bandwidth: 0, healthScore: 100 }),
+        networkMetrics: JSON.stringify({ jitter: 0, packetLoss: 0, healthScore: 100 }),
         participants: JSON.stringify([])
       };
 
       await redisClient.hmset(`${SESSION_PREFIX}${sessionId}`, sessionData);
       await redisClient.expire(`${SESSION_PREFIX}${sessionId}`, SESSION_TTL);
 
+      if (targetNode && targetNode !== 'none') {
+        await redisClient.hincrby(`node:${targetNode}`, 'load', 1);
+        console.log(`[SessionState] Node Yükü Artırıldı: ${targetNode}`);
+      }
+
       const newSessionLog = new SessionModel({
         sessionId: sessionId,
         hostId: hostId,
-        nodeId: nodeId,
+        nodeId: targetNode,
         status: 'active',
         startTime: new Date()
       });
       await newSessionLog.save();
-      console.log(`[MongoDB] Yeni Session Kaydedildi: ${sessionId}`);
+      console.log(`[MongoDB] Yeni Session Kaydedildi: ${sessionId} (Node: ${targetNode})`);
+      analyticsService.logSessionStart(sessionId, targetNode).catch(err => console.error(err));
 
-      return { ...sessionData, participants: [], networkMetrics: { jitter: 0, packetLoss: 0, healthScore: 100 } };
+      return {
+        ...sessionData,
+        participants: [],
+        userExperiences: [], // Frontend uyumluluğu için
+        networkMetrics: { jitter: 0, packetLoss: 0, healthScore: 100 }
+      };
 
     } catch (error) {
       console.error('Create Session Error:', error);
@@ -54,7 +72,7 @@ const sessionStateService = {
     }
   },
 
-  // --- 2. OTURUM BİLGİSİ ÇEKME ---
+
   async getSessionState(sessionId) {
     const key = `${SESSION_PREFIX}${sessionId}`;
     const data = await redisClient.hgetall(key);
@@ -62,30 +80,56 @@ const sessionStateService = {
     if (!data || Object.keys(data).length === 0) return null;
 
     try {
+      // Katılımcıları Parse Et
       if (data.participants) data.participants = JSON.parse(data.participants);
 
-      // Sadece JSON parse yapıyoruz, QoS hesabı burada YAPMIYORUZ.
-      if (data.networkMetrics) {
-        data.networkMetrics = JSON.parse(data.networkMetrics);
+      // --- USER EXPERIENCES LİSTESİNİ OLUŞTUR ---
+      const userExperiences = [];
+      const keysToDelete = []; // Cevabı kirleten ham veriler
+
+      for (const [field, value] of Object.entries(data)) {
+        // "metrics:USER_ID" formatındaki alanları bul
+        if (field.startsWith('metrics:')) {
+          const userId = field.split(':')[1];
+          let metricsObj = {};
+
+          try {
+            metricsObj = JSON.parse(value);
+          } catch (e) { console.error('JSON Parse Hatası:', e); }
+
+          // QoS Kararını Hesapla
+          let decision = null;
+          if (qosEngine && typeof qosEngine.determineQualityStrategy === 'function') {
+            decision = qosEngine.determineQualityStrategy(
+              { metrics: metricsObj }, // Analiz verisi
+              { qosPreference: metricsObj.qosPreference || 'balanced' } // Kullanıcı tercihi
+            );
+          }
+
+          userExperiences.push({
+            userId: userId,
+            metrics: metricsObj,
+            qosDecision: decision
+          });
+
+          // Ham veriyi listeden temizle (Frontend kafası karışmasın)
+          keysToDelete.push(field);
+        }
       }
+
+      // Ham anahtarları ve eski global alanları geçici objeden sil
+      keysToDelete.forEach(k => delete data[k]);
+      delete data.networkMetrics;
+
+      // Temiz listeyi ekle
+      data.userExperiences = userExperiences;
+
     } catch (e) { console.error('Parse Error:', e); }
 
     return data;
   },
 
-  // --- 2. METRİK GÜNCELLEME (YENİ - SİMÜLASYON İÇİN) ---
-  async updateSessionMetrics(sessionId, newMetrics) {
-    const key = `${SESSION_PREFIX}${sessionId}`;
-    const exists = await redisClient.exists(key);
-    if (!exists) throw new Error('Oturum bulunamadı.');
-
-    // Yeni metrikleri Redis'e yazıyoruz
-    await redisClient.hset(key, 'networkMetrics', JSON.stringify(newMetrics));
-    return newMetrics;
-  },
-
-
-  // --- 3. KATILIMCI EKLEME ---
+  // --- 2. KATILIMCI EKLEME (GÜNCELLENDİ: Varsayılan Metrik Oluşturma) ---
   async addParticipant(sessionId, user) {
     const key = `${SESSION_PREFIX}${sessionId}`;
     const exists = await redisClient.exists(key);
@@ -96,15 +140,64 @@ const sessionStateService = {
     if (data) participants = JSON.parse(data);
 
     const alreadyJoined = participants.find(p => p.userId === user.userId);
+
     if (!alreadyJoined) {
+      // Listeye ekle
       participants.push({ userId: user.userId, username: user.username || 'Anonim', joinedAt: Date.now() });
       await redisClient.hset(key, 'participants', JSON.stringify(participants));
+
+      let userPref = 'balanced';
+      try {
+        const dbUser = await User.findById(user.userId).select('settings');
+        if (dbUser && dbUser.settings && dbUser.settings.qosPreference) {
+          userPref = dbUser.settings.qosPreference;
+        }
+      } catch (err) { console.error('User pref fetch error:', err); }
+
+
+      const defaultMetrics = {
+        jitter: 0,
+        packetLoss: 0,
+        healthScore: 100,
+        qosPreference: userPref, // Varsayılan tercih
+        updatedAt: Date.now(),
+        isSimulated: false
+      };
+
+      // Redis'e "metrics:USERID" olarak kaydet
+      await redisClient.hset(key, `metrics:${user.userId}`, JSON.stringify(defaultMetrics));
     }
 
-    // Kullanıcının şu an hangi odada olduğunu 2 dakika boyunca hatırla.
-    // Eğer bağlantısı koparsa, geri geldiğinde bu anahtara bakıp odasını bulacağız.
     await redisClient.set(`${RECOVERY_PREFIX}${user.userId}`, sessionId, 'EX', RECOVERY_TTL);
     return participants;
+  },
+
+
+  async updateUserPreferenceOnly(sessionId, userId, newPreference) {
+    const key = `${SESSION_PREFIX}${sessionId}`;
+    const field = `metrics:${userId}`;
+
+    // Mevcut veriyi al, bozmadan sadece tercihi değiştir
+    const rawData = await redisClient.hget(key, field);
+    if (rawData) {
+      const metrics = JSON.parse(rawData);
+      metrics.qosPreference = newPreference;
+
+      await redisClient.hset(key, field, JSON.stringify(metrics));
+      return true;
+    }
+    return false;
+  },
+
+  // --- 3. KİŞİYE ÖZEL METRİK GÜNCELLEME ---
+  async updateUserMetrics(sessionId, userId, metrics) {
+    const key = `${SESSION_PREFIX}${sessionId}`;
+    const exists = await redisClient.exists(key);
+    if (!exists) throw new Error('Oturum bulunamadı.');
+
+    const fieldName = `metrics:${userId}`;
+    await redisClient.hset(key, fieldName, JSON.stringify(metrics));
+    return metrics;
   },
 
   async recoverUserSession(userId) {
@@ -171,6 +264,11 @@ const sessionStateService = {
 
     // 4. Redis'ten Sil
     await redisClient.del(key);
+
+    if (assignedNodeId && assignedNodeId !== 'none') {
+      await redisClient.hincrby(`node:${assignedNodeId}`, 'load', -1);
+      console.log(`[SessionState] 📉 Node Yükü Azaltıldı: ${assignedNodeId}`);
+    }
 
     // 5. MongoDB'ye "Final Raporu" ile Kaydet
     await SessionModel.findOneAndUpdate(

@@ -50,13 +50,54 @@ router.get('/available', auth, async (req, res) => {
     }
 });
 
-// @desc    Node Sağlık Kontrolü
-router.get('/:id/health', auth, (req, res) => {
-    res.status(200).json({
-        nodeId: req.params.id,
-        status: 'Healthy ',
-        uptime: process.uptime()
-    });
+router.get('/:id/health', auth, async (req, res) => {
+    try {
+        const targetNodeId = req.params.id;
+        const NOW = Date.now();
+        const TIMEOUT_MS = 30 * 1000;
+
+        // 1. Önce Veriyi Çek (Redis'te ne var ne yok görelim)
+        const nodeData = await redisClient.hgetall(`node:${targetNodeId}`);
+
+
+        // Eğer Node verisi hiç yoksa (Offline/Silinmiş)
+        if (!nodeData || Object.keys(nodeData).length === 0) {
+            return res.status(404).json({
+                success: false,
+                nodeId: targetNodeId,
+                message: 'Sunucu verisi bulunamadı.'
+            });
+        }
+
+        // Redis'teki gerçek statüyü alıyoruz (Muhtemelen 'active')
+        const redisStatus = nodeData.status || 'unknown';
+        const lastSeen = nodeData.lastSeen ? Number(nodeData.lastSeen) : 0;
+
+
+
+        // --- SENARYO a: ZOMBIE (TIMEOUT) ---
+        if (NOW - lastSeen > TIMEOUT_MS) {
+            return res.status(503).json({
+                success: false,
+                nodeId: targetNodeId,
+                status: redisStatus, // "active" yazıyorsa "active" döner
+                message: `Sunucudan ${Math.floor((NOW - lastSeen) / 1000)} saniyedir haber alınamıyor.`
+            });
+        }
+
+        // --- SENARYO b: SAĞLIKLI ---
+        res.status(200).json({
+            success: true,
+            nodeId: targetNodeId,
+            status: redisStatus, // Redis ile birebir aynı
+            lastSeen: new Date(lastSeen).toISOString(),
+            load: nodeData.load || 0
+        });
+
+    } catch (error) {
+        console.error('Health Check Error:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // @desc    Chaos Monkey: Node'u öldür
@@ -75,7 +116,7 @@ router.post('/register', auth, async (req, res) => {
             id: nodeId,
             ip,
             port,
-            type: type || 'relay',
+            type: type || 'worker',
             status: 'active',
             lastSeen: Date.now(),
             load: 0

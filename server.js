@@ -23,7 +23,6 @@ const authRoutes = require('./src/routes/authRoutes');      // Auth
 const sessionRoutes = require('./src/routes/sessions');     // Session
 const userRoutes = require('./src/routes/userRoutes');      // User
 const nodeRoutes = require('./src/routes/nodeRoutes');      // Node
-const metricRoutes = require('./src/routes/metricRoutes');  // Metrics
 const adminRoutes = require('./src/routes/adminRoutes');
 
 
@@ -47,7 +46,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/nodes', nodeRoutes);
-app.use('/api/metrics', metricRoutes);
 app.use('/api/admin', adminRoutes);
 
 
@@ -93,6 +91,11 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
     }
 });
 
+
+
+
+
+
 // 7. Graceful Shutdown
 process.on('SIGTERM', shutDown);
 process.on('SIGINT', shutDown);
@@ -109,5 +112,9 @@ async function shutDown() {
     if (subClient.isOpen) await subClient.quit();
 
     process.exit(0);
+
+
+
+
 }
 
